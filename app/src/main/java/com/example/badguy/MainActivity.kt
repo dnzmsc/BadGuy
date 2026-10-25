@@ -96,6 +96,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     var speedKmH = mutableStateOf(24)
         private set
 
+    private var framesWithoutTarget = 0
     private val analysisExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -186,6 +187,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 val targetToLock = currentDetectedBounds.value ?: Rect(300f, 600f, 780f, 1320f)
                 lockedBoundsState.value = targetToLock
                 workflowState = WorkflowState.LOCKED
+                framesWithoutTarget = 0
                 playCameraLockSound()
                 speak("Bersaglio tracciato")
             }
@@ -228,6 +230,22 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     fun updateTargetDetection(bounds: Rect?, distanceMeters: Int) {
         currentDetectedBounds.value = bounds
         targetDistance.value = distanceMeters
+
+        if (workflowState == WorkflowState.LOCKED) {
+            if (bounds != null) {
+                // Dynamically update locked bounds to track the moving target across the screen
+                lockedBoundsState.value = bounds
+                framesWithoutTarget = 0
+            } else {
+                framesWithoutTarget++
+                if (framesWithoutTarget > 20) { // ~0.6 seconds of losing target
+                    speak("Bersaglio perso")
+                    lockedBoundsState.value = null
+                    workflowState = WorkflowState.SEARCHING
+                    framesWithoutTarget = 0
+                }
+            }
+        }
     }
 
     private fun playCameraScanSound() {
@@ -467,7 +485,6 @@ private fun processImageProxy(
 private fun fallbackCenter(mediaImage: android.media.Image, onResult: (Rect?, Int) -> Unit) {
     val w = mediaImage.width.toFloat()
     val h = mediaImage.height.toFloat()
-    // Center reticle bounding box (Iron Man center locking box)
     val rect = Rect(w * 0.3f, h * 0.3f, w * 0.7f, h * 0.7f)
     onResult(rect, 10)
 }

@@ -1,14 +1,14 @@
-# Implementation Plan - BadGuy AR Bicycle Tactical App (Robust Shape/Object Recognition & Center Fallback)
+# Implementation Plan - BadGuy AR Bicycle Tactical App (Dynamic Target Tracking & Loss Detection)
 
-Enhancing shape and object recognition by relaxing ML Kit filtering and adding a smart center-reticle fallback for unclassified objects/obstacles.
+Implementing real-time dynamic tracking of the locked target across frames as the phone/camera moves, with automatic target loss detection ("Bersaglio perso").
 
 ## Proposed Changes
 
 ### [Component Name]
 
 #### [MODIFY] [MainActivity.kt](file:///Users/cammoranesi/AndroidStudioProjects/BadGuy/app/src/main/java/com/example/badguy/MainActivity.kt)
-- **Robust Object Detection**: Enabled multiple objects detection (`enableMultipleObjects()`).
-- **Smart Center-Reticle Fallback**: If ML Kit's base model doesn't return a labeled category, the system automatically uses a dynamic center-reticle bounding box so any object, person, or vehicle placed in the crosshairs can be locked and tracked Iron Man style.
+- **Dynamic Tracking**: In `LOCKED` state, `lockedBoundsState` continuously updates from live object detection frames to follow the target (e.g., clothespin, person, obstacle) as the camera moves.
+- **Target Loss Detection**: If the locked target leaves the screen or is lost for more than a few frames, TTS announces "Bersaglio perso" and resets to `SEARCHING` mode.
 
 ## Verification Plan
 
@@ -16,4 +16,4 @@ Enhancing shape and object recognition by relaxing ML Kit filtering and adding a
 - Gradle build (`app:assembleDebug`)
 
 ### Manual Verification
-- Deploy to connected device (`RFGL34STWPJ`) and test object/shape locking.
+- Deploy to connected device (`RFGL34STWPJ`) and test locking onto an object (like a clothespin), moving the camera to verify tracking, and moving away to verify "Bersaglio perso".
