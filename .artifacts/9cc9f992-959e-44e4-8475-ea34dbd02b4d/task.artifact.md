@@ -4,6 +4,6 @@
 - [x] Implement Iron Man HUD style (no static center box, dynamic locking on closest foreground object)
 - [x] Implement closest-object filtering and precise Italian TTS ("Bersaglio acquisito")
 - [x] Upgrade procedural explosion animation with cinematic fire, shockwaves, and embers
-- [x] Upgrade AudioTrack synthesis with cinematic sub-bass explosion rumble and layered laser SFX
+- [x] **New**: Route AR weapon explosions to detonate directly at the target's coordinates (`targetBounds`)
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)

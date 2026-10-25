@@ -365,7 +365,7 @@ fun BadGuyARApp(
             }, ContextCompat.getMainExecutor(context))
         }
 
-        // 2. Iron Man Style HUD & Cinematic Explosions
+        // 2. Iron Man Style HUD & Cinematic Explosions at Target Position
         IronManHUDOverlay(
             currentWeapon = currentWeapon,
             fireCount = fireCount,
@@ -552,19 +552,33 @@ fun IronManHUDOverlay(
                 drawCircle(ironManGold, 2f, Offset(centerX, centerY))
             }
 
-            // --- 3. Cinematic Fire & Spark Explosions ---
+            // --- 3. Cinematic Fire & Spark Explosions AT TARGET EPICENTER ---
+            val epicenterX = if (targetLocked && targetBounds != null) {
+                val scaleX = width / 1080f
+                (targetBounds.left * scaleX + targetBounds.right * scaleX) / 2f
+            } else {
+                centerX
+            }
+
+            val epicenterY = if (targetLocked && targetBounds != null) {
+                val scaleY = height / 1920f
+                (targetBounds.top * scaleY + targetBounds.bottom * scaleY) / 2f
+            } else {
+                centerY
+            }
+
             if (showExplosion.value) {
-                // Blinding core flash
-                drawCircle(color = Color.White, radius = 60f, center = Offset(centerX, centerY))
-                // Shockwave rings
-                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(centerX, centerY), style = Stroke(width = 8f))
-                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.7f, center = Offset(centerX, centerY), style = Stroke(width = 4f))
+                // Blinding core flash at target location
+                drawCircle(color = Color.White, radius = 60f, center = Offset(epicenterX, epicenterY))
+                // Shockwave rings at target location
+                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(epicenterX, epicenterY), style = Stroke(width = 8f))
+                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.7f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 4f))
             }
 
             explosionParticles.value.forEach { p ->
                 val dist = p.speed * 35f
-                val px = centerX + (cos(p.angle) * dist).toFloat()
-                val py = centerY + (sin(p.angle) * dist).toFloat()
+                val px = epicenterX + (cos(p.angle) * dist).toFloat()
+                val py = epicenterY + (sin(p.angle) * dist).toFloat()
                 drawCircle(color = p.color, radius = p.size, center = Offset(px, py))
             }
         }
@@ -625,9 +639,7 @@ fun IronManHUDOverlay(
         }
 
         Column(
-            modifier = Modifier
-                .padding(bottom = 24.dp)
-                .align(Alignment.BottomCenter),
+            modifier = Modifier.padding(bottom = 24.dp).align(Alignment.BottomCenter),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
@@ -639,7 +651,7 @@ fun IronManHUDOverlay(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = if (targetLocked) "[PREMI PLAY/PAUSE NELLE CUFFIE PER FARE FUOCO]" else "[AVVICINA UNA PERSONA O UN OGGETTO PER ACQUISIRE IL TARGET]",
+                text = if (targetLocked) "[PREMI PLAY/PAUSE NELLE CUFFIE PER FARE FUOCO SUL TARGET]" else "[AVVICINA UNA PERSONA O UN OGGETTO PER ACQUISIRE IL TARGET]",
                 color = hudDimGold,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
