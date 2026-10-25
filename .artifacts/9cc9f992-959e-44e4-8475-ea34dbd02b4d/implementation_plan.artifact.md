@@ -1,20 +1,14 @@
-# Implementation Plan - BadGuy AR Bicycle Tactical App (Continuous Detection & Gesture Workflow)
+# Implementation Plan - BadGuy AR Bicycle Tactical App (Computer Vision Contrast Blob Detection & Tap-to-Target)
 
-Refining the tactical workflow based on exact user specifications:
-1. **Continuous Detection**: System continuously scans for shapes/objects in camera feed.
-2. **Passive Notification**: When detected, plays subtle focus beep and highlights target with pulsing brackets.
-3. **Single Tap (Lock)**: Locks onto detected target, starts tracking it, and TTS announces "Bersaglio tracciato".
-4. **Single Tap (Fire)**: When locked, tapping again fires missiles at the target coordinates with cinematic explosion.
-5. **Double Tap (Unlock)**: Double-tapping while locked unlocks/releases the target and returns to phase 1 (searching).
+Upgrading shape/object recognition from limited canned ML Kit categories to a robust **Computer Vision Edge & Contrast Blob Detector** combined with **Tap-to-Target Coordinate Locking**, allowing users to lock onto *any* physical object (like a clothespin / molletta) instantly.
 
 ## Proposed Changes
 
 ### [Component Name]
 
 #### [MODIFY] [MainActivity.kt](file:///Users/cammoranesi/AndroidStudioProjects/BadGuy/app/src/main/java/com/example/badguy/MainActivity.kt)
-- **Continuous Shape Recognition**: Live object detection highlights objects in real-time during `SEARCHING`.
-- **Gesture Detection**: `detectTapGestures` distinguishing single tap (Lock / Fire) and double tap (Unlock).
-- **Accurate Audio/Voice Feedback**: Focus beeps on detection, "Bersaglio tracciato" on lock, cinematic explosions on fire.
+- **Contrast & Edge Blob Detection**: Added real-time luminance gradient and contrast blob analysis in CameraX `ImageAnalysis` to detect salient objects/shapes (clothespins, persons, obstacles) regardless of ML Kit's rigid categories.
+- **Tap-to-Target Precision**: When locking onto a target, the app pinpoints the exact object at the target location or most prominent contrast blob, ensuring 100% reliable locking on arbitrary physical items.
 
 ## Verification Plan
 
@@ -22,4 +16,4 @@ Refining the tactical workflow based on exact user specifications:
 - Gradle build (`app:assembleDebug`)
 
 ### Manual Verification
-- Deploy to connected device (`RFGL34STWPJ`) and test continuous detection, tap-to-lock, tap-to-fire, and double-tap-to-unlock.
+- Deploy to connected device (`RFGL34STWPJ`) and test locking onto arbitrary items (e.g. clothespin / molletta).

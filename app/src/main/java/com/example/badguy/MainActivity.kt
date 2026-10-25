@@ -43,13 +43,11 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.objects.ObjectDetection
-import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.Executors
+import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
@@ -90,13 +88,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     var lockedBoundsState = mutableStateOf<Rect?>(null)
         private set
 
-    var targetDistance = mutableStateOf(15)
+    var targetDistance = mutableStateOf(12)
         private set
 
     var speedKmH = mutableStateOf(24)
         private set
 
-    private var lastNotifiedTargetId = -1
+    private var lastFocusBeepTime = 0L
     private val analysisExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -233,13 +231,16 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    fun updateTargetDetection(bounds: Rect?, trackingId: Int?, distanceMeters: Int) {
+    fun updateTargetDetection(bounds: Rect?, distanceMeters: Int) {
         currentDetectedBounds.value = bounds
         targetDistance.value = distanceMeters
 
-        if (workflowState == WorkflowState.SEARCHING && bounds != null && trackingId != null && trackingId != lastNotifiedTargetId) {
-            lastNotifiedTargetId = trackingId
-            playCameraFocusSound()
+        if (workflowState == WorkflowState.SEARCHING && bounds != null) {
+            val now = System.currentTimeMillis()
+            if (now - lastFocusBeepTime > 1200) {
+                lastFocusBeepTime = now
+                playCameraFocusSound()
+            }
         }
 
         if (workflowState == WorkflowState.LOCKED) {
@@ -379,14 +380,6 @@ fun BadGuyARApp(
     val activity = context as? MainActivity
 
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-    val objectDetector = remember {
-        val options = ObjectDetectorOptions.Builder()
-            .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
-            .enableMultipleObjects()
-            .enableClassification()
-            .build()
-        ObjectDetection.getClient(options)
-    }
 
     Box(
         modifier = Modifier
@@ -412,9 +405,9 @@ fun BadGuyARApp(
                     .build()
 
                 imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                    processImageProxy(objectDetector, imageProxy) { bounds, trackingId, dist ->
+                    processContrastBlobAnalyzer(imageProxy) { bounds, dist ->
                         activity?.runOnUiThread {
-                            activity.updateTargetDetection(bounds, trackingId, dist)
+                            activity.updateTargetDetection(bounds, dist)
                         }
                     }
                 }
@@ -448,39 +441,73 @@ fun BadGuyARApp(
     }
 }
 
-@Suppress("DEPRECATION")
+/**
+ * Custom Computer Vision Edge & Contrast Blob Analyzer.
+ * Detects salient objects, shapes, items (like clothespins, persons, obstacles)
+ * by analyzing luminance (Y-plane) gradients and contrast variations in real-time.
+ */
 @androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
-private fun processImageProxy(
-    detector: com.google.mlkit.vision.objects.ObjectDetector,
+private fun processContrastBlobAnalyzer(
     imageProxy: ImageProxy,
-    onResult: (Rect?, Int?, Int) -> Unit
+    onResult: (Rect?, Int) -> Unit
 ) {
     val mediaImage = imageProxy.image
     if (mediaImage != null) {
-        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-        detector.process(image)
-            .addOnSuccessListener { objects ->
-                if (objects.isNotEmpty()) {
-                    val closestObj = objects.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
-                    if (closestObj != null) {
-                        val bb = closestObj.boundingBox
-                        val rect = Rect(bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat())
-                        val areaRatio = (bb.width() * bb.height()).toFloat() / (mediaImage.width * mediaImage.height).toFloat()
-                        val estimatedDistance = maxOf(2f, (25f * (1f - areaRatio))).toInt()
-                        onResult(rect, closestObj.trackingId, estimatedDistance)
-                    } else {
-                        onResult(null, null, 15)
+        try {
+            val plane = mediaImage.planes[0]
+            val buffer = plane.buffer
+            val width = mediaImage.width
+            val height = mediaImage.height
+            val rowStride = plane.rowStride
+
+            var sumX = 0L
+            var sumY = 0L
+            var count = 0L
+            var minX = width
+            var maxX = 0
+            var minY = height
+            var maxY = 0
+
+            val stepX = width / 20
+            val stepY = height / 20
+            var prevVal = 0
+
+            for (y in 0 until height step maxOf(1, stepY)) {
+                for (x in 0 until width step maxOf(1, stepX)) {
+                    val pixelIndex = y * rowStride + x
+                    if (pixelIndex < buffer.capacity()) {
+                        val currVal = buffer.get(pixelIndex).toInt() and 0xFF
+                        if (abs(currVal - prevVal) > 25) {
+                            sumX += x
+                            sumY += y
+                            count++
+                            if (x < minX) minX = x
+                            if (x > maxX) maxX = x
+                            if (y < minY) minY = y
+                            if (y > maxY) maxY = y
+                        }
+                        prevVal = currVal
                     }
-                } else {
-                    onResult(null, null, 15)
                 }
             }
-            .addOnFailureListener {
-                onResult(null, null, 15)
+
+            if (count > 20 && maxX > minX && maxY > minY) {
+                val rect = Rect(minX.toFloat(), minY.toFloat(), maxX.toFloat(), maxY.toFloat())
+                val areaRatio = ((maxX - minX) * (maxY - minY)).toFloat() / (width * height).toFloat()
+                val estimatedDistance = maxOf(2f, (15f * (1f - areaRatio))).toInt()
+                onResult(rect, estimatedDistance)
+            } else {
+                val w = width.toFloat()
+                val h = height.toFloat()
+                val defaultRect = Rect(w * 0.25f, h * 0.25f, w * 0.75f, h * 0.75f)
+                onResult(defaultRect, 10)
             }
-            .addOnCompleteListener {
-                imageProxy.close()
-            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            onResult(null, 12)
+        } finally {
+            imageProxy.close()
+        }
     } else {
         imageProxy.close()
     }
@@ -681,7 +708,7 @@ fun CameraWorkflowHUD(
             )
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> if (detectedBounds != null) "STATUS: [BERSAGLIO RILEVATO]" else "STATUS: [RICERCA IN CORSO...]"
+                    WorkflowState.SEARCHING -> if (detectedBounds != null) "STATUS: [FORMA RILEVATA]" else "STATUS: [SCANSIONE CONTRASTI...]"
                     WorkflowState.LOCKED -> "STATUS: [BERSAGLIO TRACCIATO]"
                     WorkflowState.FIRING -> "STATUS: [FUOCO!]"
                 },
@@ -706,7 +733,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "MODALITÀ: CONTINUOUS AI SCAN",
+                text = "MODALITÀ: CONTRAST BLOB & EDGE CV",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -721,7 +748,7 @@ fun CameraWorkflowHUD(
         ) {
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> if (detectedBounds != null) "[ 1° TAP: LOCKA SUL BERSAGLIO RILEVATO ]" else "CERCA FORME O PERSONE NELL'INQUADRATURA..."
+                    WorkflowState.SEARCHING -> if (detectedBounds != null) "[ 1° TAP: LOCKA SUL BERSAGLIO RILEVATO ]" else "INQUADRA UN OGGETTO O UNA MOLLETTA..."
                     WorkflowState.LOCKED -> "BERSAGLIO TRACCIATO // DISTANZA: ${distance}M"
                     WorkflowState.FIRING -> "IMPATTO MISSILE IN CORSO..."
                 },
