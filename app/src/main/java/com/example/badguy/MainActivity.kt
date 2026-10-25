@@ -96,8 +96,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     var speedKmH = mutableStateOf(24)
         private set
 
-    private var lastNotifiedTargetId = -1
-    private var lastFocusBeepTime = 0L
+    private var framesWithoutTarget = 0
     private val analysisExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -127,7 +126,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
                             KeyEvent.KEYCODE_HEADSETHOOK,
                             KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                                runOnUiThread { handleSingleTap() }
+                                runOnUiThread { handleActionTrigger() }
                                 return true
                             }
                         }
@@ -151,7 +150,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 lockedBounds = lockedBoundsState.value,
                 distance = targetDistance.value,
                 speed = speedKmH.value,
-                onSingleTap = { handleSingleTap() },
+                onActionTrigger = { handleActionTrigger() },
                 onDoubleTap = { handleDoubleTap() }
             )
         }
@@ -180,12 +179,19 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         playBeepSound(400.0, 100)
     }
 
-    fun handleSingleTap() {
+    /**
+     * Bicycle Handlebar Trigger (Headphone button or screen tap):
+     * 1. SEARCHING: Captures the feature/target currently aligned in the central aiming zone ("Bersaglio tracciato").
+     * 2. LOCKED: Fires missiles at the tracked target ("Bersaglio distrutto!").
+     */
+    fun handleActionTrigger() {
         when (workflowState) {
             WorkflowState.SEARCHING -> {
-                val targetToLock = currentDetectedBounds.value ?: Rect(300f, 600f, 780f, 1320f)
+                // Lock onto current detected bounds in center zone, or capture center aiming box
+                val targetToLock = currentDetectedBounds.value ?: Rect(280f, 550f, 800f, 1370f)
                 lockedBoundsState.value = targetToLock
                 workflowState = WorkflowState.LOCKED
+                framesWithoutTarget = 0
                 playCameraLockSound()
                 speak("Bersaglio tracciato")
             }
@@ -227,50 +233,32 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
             KeyEvent.KEYCODE_HEADSETHOOK,
             KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                handleSingleTap()
+                handleActionTrigger()
                 true
             }
             else -> super.onKeyDown(keyCode, event)
         }
     }
 
-    fun updateTargetDetection(bounds: Rect?, trackingId: Int?, distanceMeters: Int) {
+    fun updateTargetDetection(bounds: Rect?, distanceMeters: Int) {
         currentDetectedBounds.value = bounds
         targetDistance.value = distanceMeters
 
-        if (workflowState == WorkflowState.SEARCHING && bounds != null) {
-            val now = System.currentTimeMillis()
-            if (trackingId != null && trackingId != lastNotifiedTargetId) {
-                lastNotifiedTargetId = trackingId
-                lastFocusBeepTime = now
-                playCameraFocusSound()
-            } else if (now - lastFocusBeepTime > 3000) {
-                lastFocusBeepTime = now
-                playCameraFocusSound()
-            }
-        }
-
+        // Dynamic target tracking in LOCKED state
         if (workflowState == WorkflowState.LOCKED) {
             if (bounds != null) {
                 lockedBoundsState.value = bounds
+                framesWithoutTarget = 0
+            } else {
+                framesWithoutTarget++
+                if (framesWithoutTarget > 25) { // ~0.8s without target
+                    speak("Bersaglio perso")
+                    lockedBoundsState.value = null
+                    workflowState = WorkflowState.SEARCHING
+                    framesWithoutTarget = 0
+                }
             }
         }
-    }
-
-    private fun playCameraFocusSound() {
-        Thread {
-            try {
-                val sampleRate = 44100
-                val numSamples = sampleRate / 15
-                val samples = ShortArray(numSamples)
-                for (i in 0 until numSamples) {
-                    samples[i] = (sin(2.0 * Math.PI * 1046.5 * i / sampleRate) * 6000).toInt().toShort()
-                }
-                playAudioSamples(samples)
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }.start()
     }
 
     private fun playCameraLockSound() {
@@ -379,7 +367,7 @@ fun BadGuyARApp(
     lockedBounds: Rect?,
     distance: Int,
     speed: Int,
-    onSingleTap: () -> Unit,
+    onActionTrigger: () -> Unit,
     onDoubleTap: () -> Unit
 ) {
     val context = LocalContext.current
@@ -419,9 +407,9 @@ fun BadGuyARApp(
                     .build()
 
                 imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                    processImageProxy(objectDetector, imageProxy) { bounds, trackingId, dist ->
+                    processImageProxy(objectDetector, imageProxy) { bounds, dist ->
                         activity?.runOnUiThread {
-                            activity.updateTargetDetection(bounds, trackingId, dist)
+                            activity.updateTargetDetection(bounds, dist)
                         }
                     }
                 }
@@ -449,7 +437,7 @@ fun BadGuyARApp(
             lockedBounds = lockedBounds,
             distance = distance,
             speed = speed,
-            onSingleTap = onSingleTap,
+            onActionTrigger = onActionTrigger,
             onDoubleTap = onDoubleTap
         )
     }
@@ -460,7 +448,7 @@ fun BadGuyARApp(
 private fun processImageProxy(
     detector: com.google.mlkit.vision.objects.ObjectDetector,
     imageProxy: ImageProxy,
-    onResult: (Rect?, Int?, Int) -> Unit
+    onResult: (Rect?, Int) -> Unit
 ) {
     val mediaImage = imageProxy.image
     if (mediaImage != null) {
@@ -471,7 +459,7 @@ private fun processImageProxy(
                 val frameCenterY = mediaImage.height / 2f
 
                 if (objects.isNotEmpty()) {
-                    // Prioritize object closest to the camera center
+                    // Find object closest to central camera aiming zone
                     val centerObj = objects.minByOrNull { obj ->
                         val bb = obj.boundingBox
                         val dx = bb.centerX().toFloat() - frameCenterX
@@ -484,16 +472,16 @@ private fun processImageProxy(
                         val rect = Rect(bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat())
                         val areaRatio = (bb.width() * bb.height()).toFloat() / (mediaImage.width * mediaImage.height).toFloat()
                         val estimatedDistance = maxOf(2f, (20f * (1f - areaRatio))).toInt()
-                        onResult(rect, centerObj.trackingId, estimatedDistance)
+                        onResult(rect, estimatedDistance)
                     } else {
-                        fallbackCenter(mediaImage, onResult)
+                        onResult(null, 12)
                     }
                 } else {
-                    fallbackCenter(mediaImage, onResult)
+                    onResult(null, 12)
                 }
             }
             .addOnFailureListener {
-                fallbackCenter(mediaImage, onResult)
+                onResult(null, 12)
             }
             .addOnCompleteListener {
                 imageProxy.close()
@@ -501,13 +489,6 @@ private fun processImageProxy(
     } else {
         imageProxy.close()
     }
-}
-
-private fun fallbackCenter(mediaImage: android.media.Image, onResult: (Rect?, Int?, Int) -> Unit) {
-    val w = mediaImage.width.toFloat()
-    val h = mediaImage.height.toFloat()
-    val rect = Rect(w * 0.3f, h * 0.3f, w * 0.7f, h * 0.7f)
-    onResult(rect, -1, 10)
 }
 
 @Composable
@@ -519,7 +500,7 @@ fun CameraWorkflowHUD(
     lockedBounds: Rect?,
     distance: Int,
     speed: Int,
-    onSingleTap: () -> Unit,
+    onActionTrigger: () -> Unit,
     onDoubleTap: () -> Unit
 ) {
     val ironManGold = Color(0xFFFFCC00)
@@ -576,7 +557,7 @@ fun CameraWorkflowHUD(
             .fillMaxSize()
             .pointerInput(Unit) {
                 detectTapGestures(
-                    onTap = { onSingleTap() },
+                    onTap = { onActionTrigger() },
                     onDoubleTap = { onDoubleTap() }
                 )
             }
@@ -602,9 +583,22 @@ fun CameraWorkflowHUD(
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f - bracketLen, height - 50f), strokeW)
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f, height - 50f - bracketLen), strokeW)
 
-            // --- 2. State-Based Visuals & Passive Detection ---
+            // --- 2. Central Fixed Aiming Zone (Bicycle Handlebar Aiming) ---
+            val zoneW = 160.dp.toPx()
+            val zoneH = 160.dp.toPx()
+            val zLeft = centerX - zoneW / 2f
+            val zTop = centerY - zoneH / 2f
+            val zRight = centerX + zoneW / 2f
+            val zBottom = centerY + zoneH / 2f
+
             when (workflowState) {
                 WorkflowState.SEARCHING -> {
+                    // Central aiming reticle (where the bicycle points)
+                    val arcColor = ironManGold.copy(alpha = pulseAlpha)
+                    drawCircle(color = hudDimGold, radius = zoneW / 2f, center = Offset(centerX, centerY), style = Stroke(width = 1.5f))
+                    drawCircle(color = arcColor, radius = 6.dp.toPx(), center = Offset(centerX, centerY))
+
+                    // If an object is entering the central zone, draw highlight brackets
                     if (detectedBounds != null) {
                         val scaleX = width / 1080f
                         val scaleY = height / 1920f
@@ -613,23 +607,19 @@ fun CameraWorkflowHUD(
                         val dRight = detectedBounds.right * scaleX
                         val dBottom = detectedBounds.bottom * scaleY
                         val cornerSize = 20f
-                        val highlightColor = ironManGold.copy(alpha = pulseAlpha)
 
-                        drawLine(highlightColor, Offset(dLeft, dTop), Offset(dLeft + cornerSize, dTop), 4f)
-                        drawLine(highlightColor, Offset(dLeft, dTop), Offset(dLeft, dTop + cornerSize), 4f)
-                        drawLine(highlightColor, Offset(dRight, dTop), Offset(dRight - cornerSize, dTop), 4f)
-                        drawLine(highlightColor, Offset(dRight, dTop), Offset(dRight, dTop + cornerSize), 4f)
-                        drawLine(highlightColor, Offset(dLeft, dBottom), Offset(dLeft + cornerSize, dBottom), 4f)
-                        drawLine(highlightColor, Offset(dLeft, dBottom), Offset(dLeft, dBottom - cornerSize), 4f)
-                        drawLine(highlightColor, Offset(dRight, dBottom), Offset(dRight - cornerSize, dBottom), 4f)
-                        drawLine(highlightColor, Offset(dRight, dBottom), Offset(dRight, dBottom - cornerSize), 4f)
-                    } else {
-                        drawCircle(ironManGold, 3f, Offset(centerX, centerY))
-                        drawCircle(color = hudDimGold, radius = 40.dp.toPx(), center = Offset(centerX, centerY), style = Stroke(width = 1f))
+                        drawLine(arcColor, Offset(dLeft, dTop), Offset(dLeft + cornerSize, dTop), 4f)
+                        drawLine(arcColor, Offset(dLeft, dTop), Offset(dLeft, dTop + cornerSize), 4f)
+                        drawLine(arcColor, Offset(dRight, dTop), Offset(dRight - cornerSize, dTop), 4f)
+                        drawLine(arcColor, Offset(dRight, dTop), Offset(dRight, dTop + cornerSize), 4f)
+                        drawLine(arcColor, Offset(dLeft, dBottom), Offset(dLeft + cornerSize, dBottom), 4f)
+                        drawLine(arcColor, Offset(dLeft, dBottom), Offset(dLeft, dBottom - cornerSize), 4f)
+                        drawLine(arcColor, Offset(dRight, dBottom), Offset(dRight - cornerSize, dBottom), 4f)
+                        drawLine(arcColor, Offset(dRight, dBottom), Offset(dRight, dBottom - cornerSize), 4f)
                     }
                 }
                 WorkflowState.LOCKED, WorkflowState.FIRING -> {
-                    val bounds = lockedBounds ?: Rect(centerX - 100f, centerY - 100f, centerX + 100f, centerY + 100f)
+                    val bounds = lockedBounds ?: Rect(zLeft, zTop, zRight, zBottom)
                     val scaleX = width / 1080f
                     val scaleY = height / 1920f
                     val tLeft = bounds.left * scaleX
@@ -640,6 +630,7 @@ fun CameraWorkflowHUD(
 
                     val lockColor = hudRed.copy(alpha = pulseAlpha)
 
+                    // Locked Iron Man tracking brackets following target
                     drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft + cornerSize, tTop), 6f)
                     drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerSize), 6f)
 
@@ -651,10 +642,13 @@ fun CameraWorkflowHUD(
 
                     drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight - cornerSize, tBottom), 6f)
                     drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight, tBottom - cornerSize), 6f)
+
+                    drawLine(lockColor.copy(alpha = 0.3f), Offset(tLeft, (tTop + tBottom) / 2f), Offset(tRight, (tTop + tBottom) / 2f), 1f)
+                    drawLine(lockColor.copy(alpha = 0.3f), Offset((tLeft + tRight) / 2f, tTop), Offset((tLeft + tRight) / 2f, tBottom), 1f)
                 }
             }
 
-            // --- 3. Cinematic Fire & Spark Explosions AT LOCKED TARGET EPICENTER ---
+            // --- 3. Cinematic Explosions AT LOCKED TARGET EPICENTER ---
             val epicenterX = if (lockedBounds != null) {
                 val scaleX = width / 1080f
                 (lockedBounds.left * scaleX + lockedBounds.right * scaleX) / 2f
@@ -690,7 +684,7 @@ fun CameraWorkflowHUD(
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // TACTICAL HUD",
+                text = "JARVIS // BICYCLE AR TACTICAL",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -705,9 +699,9 @@ fun CameraWorkflowHUD(
             )
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> if (detectedBounds != null) "STATUS: [BERSAGLIO CENTRALE RILEVATO]" else "STATUS: [SCANSIONE IN CORSO...]"
-                    WorkflowState.LOCKED -> "STATUS: [BERSAGLIO TRACCIATO]"
-                    WorkflowState.FIRING -> "STATUS: [FUOCO!]"
+                    WorkflowState.SEARCHING -> "STATO: [INQUADRA BICI E CLICCA CUFFIA]"
+                    WorkflowState.LOCKED -> "STATO: [BERSAGLIO TRACCIATO]"
+                    WorkflowState.FIRING -> "STATO: [IMPATTO MISSILE!]"
                 },
                 color = if (workflowState == WorkflowState.LOCKED) hudRed else ironManGold,
                 fontSize = 11.sp,
@@ -730,7 +724,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "MODALITÀ: CENTER-WEIGHTED AI TARGETING",
+                text = "SISTEMA: HANDS-FREE BICYCLE HUD",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -745,9 +739,9 @@ fun CameraWorkflowHUD(
         ) {
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> if (detectedBounds != null) "[ 1° TAP: LOCKA SUL BERSAGLIO CENTRALE ]" else "PORTA L'OGGETTO AL CENTRO DELL'INQUADRATURA..."
+                    WorkflowState.SEARCHING -> "PUNTA IL MANUBRIO ED ESEGUI 1° CLICK CUFFIA // TAP PER LOCKARE"
                     WorkflowState.LOCKED -> "BERSAGLIO TRACCIATO // DISTANZA: ${distance}M"
-                    WorkflowState.FIRING -> "IMPATTO MISSILE IN CORSO..."
+                    WorkflowState.FIRING -> "ESPLOSIONE SUL BERSAGLIO IN CORSO..."
                 },
                 color = if (workflowState == WorkflowState.LOCKED) hudRed else ironManGold,
                 fontSize = 14.sp,
@@ -757,9 +751,9 @@ fun CameraWorkflowHUD(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> "[ 2° TAP RAPIDO (DOPPIO TAP) = SBLOCCA ]"
-                    WorkflowState.LOCKED -> "[ 1° TAP = SPARO ] | [ DOPPIO TAP = SBLOCCA ]"
-                    WorkflowState.FIRING -> "MISSILE IN VOLO..."
+                    WorkflowState.SEARCHING -> "[ TASTO PLAY/PAUSE CUFFIE = LOCKA L'AREA CENTRALE ]"
+                    WorkflowState.LOCKED -> "[ TASTO PLAY/PAUSE CUFFIE = FA FUOCO SUL TARGET ]"
+                    WorkflowState.FIRING -> "MISSILE IMPATTATO..."
                 },
                 color = hudDimGold,
                 fontSize = 10.sp,

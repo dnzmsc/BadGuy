@@ -1,7 +1,6 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
-- [x] **New**: Implement center-weighted object selection (prioritizing objects near screen center)
-- [x] **New**: Implement debounced camera focus beep when a new target enters the central crosshairs
-- [x] Implement tap-to-lock, dynamic tracking, and tap-to-fire workflow
+- [x] **New**: Implement fixed central aiming zone (ROI) for bicycle handlebar aiming
+- [x] **New**: Implement headphone button / tap feature capture, tracking, and target engagement
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
