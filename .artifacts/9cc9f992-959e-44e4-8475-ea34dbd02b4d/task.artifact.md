@@ -1,6 +1,6 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
-- [x] Implement continuous shape search and 5-step workflow (Search -> Highlight -> Lock/Track -> Unlock -> Fire)
-- [x] **New**: Implement Computer Vision Contrast Blob & Edge Detection in `ImageAnalysis` to reliably detect arbitrary physical objects (clothespins, obstacles)
+- [x] **New**: Remove repetitive audio loops and implement clean ML Kit stream object detection
+- [x] Implement smart tap-to-lock, dynamic tracking, and tap-to-fire workflow
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
