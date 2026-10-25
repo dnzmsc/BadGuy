@@ -1,14 +1,19 @@
-# Implementation Plan - BadGuy AR Bicycle Tactical App (Target-Locked Explosions)
+# Implementation Plan - BadGuy AR Bicycle Tactical App (3-Step Camera Tap Lock Workflow)
 
-Fixing AR weapon firing to detonate explosions directly at the acquired target's screen coordinates rather than screen center.
+Implementing a precise 3-step camera-style tap workflow:
+1. **First tap**: Enters Acquisition mode (scanning sound).
+2. **Second tap**: Locks onto the target in view, plays camera focus beeps, and TTS says "Bersaglio tracciato".
+3. **Third tap**: Fires at the locked target coordinates with cinematic explosion.
 
 ## Proposed Changes
 
 ### [Component Name]
 
 #### [MODIFY] [MainActivity.kt](file:///Users/cammoranesi/AndroidStudioProjects/BadGuy/app/src/main/java/com/example/badguy/MainActivity.kt)
-- **Target-Locked Explosions**: When firing at an acquired target, explosions (flash, shockwaves, sparks) originate at the center of the target's bounding box (`targetBounds`) instead of screen center.
-- Maintains fallback to screen center if no target is active.
+- Added explicit state machine for tap workflow: `SEARCHING` -> `ACQUIRING` -> `LOCKED` -> `FIRING`.
+- Camera-style focus and lock audio feedback via `AudioTrack`.
+- Voice announcement "Bersaglio tracciato" strictly upon locking.
+- Explosions detonate precisely at the locked target coordinates.
 
 ## Verification Plan
 
@@ -16,4 +21,4 @@ Fixing AR weapon firing to detonate explosions directly at the acquired target's
 - Gradle build (`app:assembleDebug`)
 
 ### Manual Verification
-- Deploy to connected device (`RFGL34STWPJ`) and verify that firing detonates precisely where the target is located in the AR camera feed.
+- Deploy to connected device (`RFGL34STWPJ`) and test the 3-step tap sequence.

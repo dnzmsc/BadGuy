@@ -53,6 +53,20 @@ import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
 
+enum class WorkflowState {
+    SEARCHING,
+    ACQUIRING,
+    LOCKED,
+    FIRING
+}
+
+data class CinematicSpark(
+    val angle: Double,
+    val speed: Float,
+    val size: Float,
+    val color: Color
+)
+
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     private lateinit var tts: TextToSpeech
@@ -63,14 +77,17 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     private val weapons = listOf("01: Ion Blaster", "02: Plasma Cannon", "03: Photon Torpedo", "04: EMP Disruptor")
     private var currentWeaponIndex by mutableStateOf(0)
 
-    // Game state triggers shared with Compose
+    // Workflow & game state
+    var workflowState by mutableStateOf(WorkflowState.SEARCHING)
+        private set
+
     var fireEventCount = mutableStateOf(0)
         private set
 
-    var targetLockedState = mutableStateOf(false)
+    var currentDetectedBounds = mutableStateOf<Rect?>(null)
         private set
 
-    var targetBoundsState = mutableStateOf<Rect?>(null)
+    var lockedBoundsState = mutableStateOf<Rect?>(null)
         private set
 
     var targetDistance = mutableStateOf(15)
@@ -79,7 +96,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     var speedKmH = mutableStateOf(24)
         private set
 
-    private var lastSpokenTargetId = -1
     private val analysisExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -109,7 +125,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
                             KeyEvent.KEYCODE_HEADSETHOOK,
                             KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                                runOnUiThread { triggerFire() }
+                                runOnUiThread { handleTapWorkflow() }
                                 return true
                             }
                         }
@@ -127,12 +143,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         setContent {
             BadGuyARApp(
                 currentWeapon = weapons[currentWeaponIndex],
+                workflowState = workflowState,
                 fireCount = fireEventCount.value,
-                targetLocked = targetLockedState.value,
-                targetBounds = targetBoundsState.value,
+                lockedBounds = lockedBoundsState.value,
                 distance = targetDistance.value,
                 speed = speedKmH.value,
-                onScreenTap = { triggerFire() }
+                onScreenTap = { handleTapWorkflow() }
             )
         }
     }
@@ -142,7 +158,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             val result = tts.setLanguage(Locale.ITALIAN)
             if (result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED) {
                 isTtsReady = true
-                speak("Computer di bordo Iron Man attivo. Armamento: ${weapons[currentWeaponIndex]}")
+                speak("Computer di bordo attivo. Armamento: ${weapons[currentWeaponIndex]}")
             }
         }
     }
@@ -157,17 +173,35 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         currentWeaponIndex = (currentWeaponIndex + direction + weapons.size) % weapons.size
         val weaponName = weapons[currentWeaponIndex]
         speak("Arma cambiata: $weaponName")
-        playBeepSound()
+        playBeepSound(400.0, 100)
     }
 
-    fun triggerFire() {
-        if (targetLockedState.value) {
-            fireEventCount.value++
-            playCinematicExplosionSound()
-            speak("Bersaglio distrutto!")
-        } else {
-            speak("Nessun bersaglio acquisito. Impossibile fare fuoco.")
-            playBeepSound()
+    fun handleTapWorkflow() {
+        when (workflowState) {
+            WorkflowState.SEARCHING -> {
+                workflowState = WorkflowState.ACQUIRING
+                playCameraScanSound()
+            }
+            WorkflowState.ACQUIRING -> {
+                val targetToLock = currentDetectedBounds.value ?: Rect(400f, 700f, 680f, 1220f)
+                lockedBoundsState.value = targetToLock
+                workflowState = WorkflowState.LOCKED
+                playCameraLockSound()
+                speak("Bersaglio tracciato")
+            }
+            WorkflowState.LOCKED -> {
+                workflowState = WorkflowState.FIRING
+                fireEventCount.value++
+                playCinematicExplosionSound()
+                speak("Bersaglio distrutto!")
+                android.os.Handler(mainLooper).postDelayed({
+                    lockedBoundsState.value = null
+                    workflowState = WorkflowState.SEARCHING
+                }, 800)
+            }
+            WorkflowState.FIRING -> {
+                // Already firing
+            }
         }
     }
 
@@ -184,31 +218,75 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
             KeyEvent.KEYCODE_HEADSETHOOK,
             KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                triggerFire()
+                handleTapWorkflow()
                 true
             }
             else -> super.onKeyDown(keyCode, event)
         }
     }
 
-    fun updateTargetDetection(hasTarget: Boolean, bounds: Rect?, trackingId: Int?, distanceMeters: Int) {
-        targetLockedState.value = hasTarget
-        targetBoundsState.value = bounds
+    fun updateTargetDetection(bounds: Rect?, distanceMeters: Int) {
+        currentDetectedBounds.value = bounds
         targetDistance.value = distanceMeters
+    }
 
-        if (hasTarget && trackingId != null && trackingId != lastSpokenTargetId) {
-            lastSpokenTargetId = trackingId
-            speak("Bersaglio acquisito")
-        } else if (!hasTarget) {
-            lastSpokenTargetId = -1
-        }
+    private fun playCameraScanSound() {
+        Thread {
+            try {
+                val sampleRate = 44100
+                val numSamples = sampleRate / 6
+                val samples = ShortArray(numSamples)
+                for (i in 0 until numSamples) {
+                    val t = i.toDouble() / sampleRate
+                    samples[i] = (sin(2.0 * Math.PI * 880.0 * t) * 12000).toInt().toShort()
+                }
+                playAudioSamples(samples)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
+    }
+
+    private fun playCameraLockSound() {
+        Thread {
+            try {
+                val sampleRate = 44100
+                val numSamples = sampleRate / 5
+                val samples = ShortArray(numSamples)
+                for (i in 0 until numSamples) {
+                    val t = i.toDouble() / sampleRate
+                    val freq = if ((i / (sampleRate / 20)) % 2 == 0) 1200.0 else 1800.0
+                    samples[i] = (sin(2.0 * Math.PI * freq * t) * 16383).toInt().toShort()
+                }
+                playAudioSamples(samples)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
+    }
+
+    private fun playBeepSound(freq: Double, durationMs: Int) {
+        Thread {
+            try {
+                val sampleRate = 44100
+                val numSamples = (sampleRate * durationMs) / 1000
+                val samples = ShortArray(numSamples)
+                for (i in 0 until numSamples) {
+                    val t = i.toDouble() / sampleRate
+                    samples[i] = (sin(2.0 * Math.PI * freq * t) * 16383).toInt().toShort()
+                }
+                playAudioSamples(samples)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
     }
 
     private fun playCinematicExplosionSound() {
         Thread {
             try {
                 val sampleRate = 44100
-                val numSamples = (sampleRate * 0.7).toInt() // ~700ms cinematic explosion
+                val numSamples = (sampleRate * 0.7).toInt()
                 val samples = ShortArray(numSamples)
                 val random = java.util.Random()
                 for (i in 0 until numSamples) {
@@ -220,68 +298,39 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     val mixed = (subBass * 0.5 + noise * 0.4 + crackle * 0.1)
                     samples[i] = (mixed * 32767 * envelope).toInt().toShort()
                 }
-                val audioTrack = AudioTrack.Builder()
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_GAME)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                    )
-                    .setAudioFormat(
-                        AudioFormat.Builder()
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .setSampleRate(sampleRate)
-                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                            .build()
-                    )
-                    .setBufferSizeInBytes(samples.size * 2)
-                    .setTransferMode(AudioTrack.MODE_STATIC)
-                    .build()
-                audioTrack.write(samples, 0, samples.size)
-                audioTrack.play()
-                Thread.sleep(750)
-                audioTrack.release()
+                playAudioSamples(samples)
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }.start()
     }
 
-    private fun playBeepSound() {
-        Thread {
-            try {
-                val sampleRate = 44100
-                val numSamples = sampleRate / 10
-                val samples = ShortArray(numSamples)
-                for (i in 0 until numSamples) {
-                    val t = i.toDouble() / sampleRate
-                    samples[i] = (sin(2.0 * Math.PI * 587.33 * t) * 16383).toInt().toShort()
-                }
-                val audioTrack = AudioTrack.Builder()
-                    .setAudioAttributes(
-                        AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_GAME)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                            .build()
-                    )
-                    .setAudioFormat(
-                        AudioFormat.Builder()
-                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                            .setSampleRate(sampleRate)
-                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
-                            .build()
-                    )
-                    .setBufferSizeInBytes(samples.size * 2)
-                    .setTransferMode(AudioTrack.MODE_STATIC)
-                    .build()
-                audioTrack.write(samples, 0, samples.size)
-                audioTrack.play()
-                Thread.sleep(120)
-                audioTrack.release()
-            } catch (e: Exception) {
-                e.printStackTrace()
-            }
-        }.start()
+    private fun playAudioSamples(samples: ShortArray) {
+        try {
+            val audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_GAME)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(44100)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                        .build()
+                )
+                .setBufferSizeInBytes(samples.size * 2)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+            audioTrack.write(samples, 0, samples.size)
+            audioTrack.play()
+            Thread.sleep((samples.size * 1000L / 44100) + 50)
+            audioTrack.release()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     override fun onDestroy() {
@@ -298,9 +347,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 @Composable
 fun BadGuyARApp(
     currentWeapon: String,
+    workflowState: WorkflowState,
     fireCount: Int,
-    targetLocked: Boolean,
-    targetBounds: Rect?,
+    lockedBounds: Rect?,
     distance: Int,
     speed: Int,
     onScreenTap: () -> Unit
@@ -323,7 +372,6 @@ fun BadGuyARApp(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // 1. Camera Feed with Smart Object & Person Filtering
         AndroidView(
             factory = { ctx ->
                 PreviewView(ctx).apply {
@@ -343,9 +391,9 @@ fun BadGuyARApp(
                     .build()
 
                 imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                    processImageProxy(objectDetector, imageProxy) { hasTarget, bounds, trackingId, dist ->
+                    processImageProxy(objectDetector, imageProxy) { bounds, dist ->
                         activity?.runOnUiThread {
-                            activity.updateTargetDetection(hasTarget, bounds, trackingId, dist)
+                            activity.updateTargetDetection(bounds, dist)
                         }
                     }
                 }
@@ -365,12 +413,11 @@ fun BadGuyARApp(
             }, ContextCompat.getMainExecutor(context))
         }
 
-        // 2. Iron Man Style HUD & Cinematic Explosions at Target Position
-        IronManHUDOverlay(
+        CameraWorkflowHUD(
             currentWeapon = currentWeapon,
+            workflowState = workflowState,
             fireCount = fireCount,
-            targetLocked = targetLocked,
-            targetBounds = targetBounds,
+            lockedBounds = lockedBounds,
             distance = distance,
             speed = speed,
             onScreenTap = onScreenTap
@@ -383,7 +430,7 @@ fun BadGuyARApp(
 private fun processImageProxy(
     detector: com.google.mlkit.vision.objects.ObjectDetector,
     imageProxy: ImageProxy,
-    onResult: (Boolean, Rect?, Int?, Int) -> Unit
+    onResult: (Rect?, Int) -> Unit
 ) {
     val mediaImage = imageProxy.image
     if (mediaImage != null) {
@@ -394,7 +441,7 @@ private fun processImageProxy(
                     val bb = obj.boundingBox
                     val area = (bb.width() * bb.height()).toFloat()
                     val totalArea = (mediaImage.width * mediaImage.height).toFloat()
-                    area >= (totalArea * 0.04f)
+                    area >= (totalArea * 0.03f)
                 }
 
                 if (validObjects.isNotEmpty()) {
@@ -402,20 +449,18 @@ private fun processImageProxy(
                     if (closestObj != null) {
                         val bb = closestObj.boundingBox
                         val rect = Rect(bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat())
-                        
                         val areaRatio = (bb.width() * bb.height()).toFloat() / (mediaImage.width * mediaImage.height).toFloat()
                         val estimatedDistance = maxOf(2f, (25f * (1f - areaRatio))).toInt()
-
-                        onResult(true, rect, closestObj.trackingId, estimatedDistance)
+                        onResult(rect, estimatedDistance)
                     } else {
-                        onResult(false, null, null, 15)
+                        onResult(null, 15)
                     }
                 } else {
-                    onResult(false, null, null, 15)
+                    onResult(null, 15)
                 }
             }
             .addOnFailureListener {
-                onResult(false, null, null, 15)
+                onResult(null, 15)
             }
             .addOnCompleteListener {
                 imageProxy.close()
@@ -426,11 +471,11 @@ private fun processImageProxy(
 }
 
 @Composable
-fun IronManHUDOverlay(
+fun CameraWorkflowHUD(
     currentWeapon: String,
+    workflowState: WorkflowState,
     fireCount: Int,
-    targetLocked: Boolean,
-    targetBounds: Rect?,
+    lockedBounds: Rect?,
     distance: Int,
     speed: Int,
     onScreenTap: () -> Unit
@@ -441,12 +486,12 @@ fun IronManHUDOverlay(
     val fireOrange = Color(0xFFFF8800)
     val fireYellow = Color(0xFFFFEE00)
 
-    val infiniteTransition = rememberInfiniteTransition(label = "ironman_hud")
+    val infiniteTransition = rememberInfiniteTransition(label = "workflow_hud")
     val pulseAlpha by infiniteTransition.animateFloat(
-        initialValue = 0.6f,
+        initialValue = 0.5f,
         targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(600, easing = FastOutSlowInEasing),
+            animation = tween(500, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
         label = "pulseAlpha"
@@ -495,82 +540,74 @@ fun IronManHUDOverlay(
             val centerX = width / 2f
             val centerY = height / 2f
 
-            // --- 1. Iron Man Helmet Corners & Arc Reactor HUD lines ---
+            // --- 1. Iron Man Helmet Corners ---
             val bracketLen = 120f
             val strokeW = 3f
-
-            // Top-Left
             drawLine(hudDimGold, Offset(50f, 50f), Offset(50f + bracketLen, 50f), strokeW)
             drawLine(hudDimGold, Offset(50f, 50f), Offset(50f, 50f + bracketLen), strokeW)
-            // Top-Right
+
             drawLine(hudDimGold, Offset(width - 50f, 50f), Offset(width - 50f - bracketLen, 50f), strokeW)
             drawLine(hudDimGold, Offset(width - 50f, 50f), Offset(width - 50f, 50f + bracketLen), strokeW)
-            // Bottom-Left
+
             drawLine(hudDimGold, Offset(50f, height - 50f), Offset(50f + bracketLen, height - 50f), strokeW)
             drawLine(hudDimGold, Offset(50f, height - 50f), Offset(50f, height - 50f - bracketLen), strokeW)
-            // Bottom-Right
+
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f - bracketLen, height - 50f), strokeW)
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f, height - 50f - bracketLen), strokeW)
 
-            // --- 2. Dynamic Target Locking (Iron Man Style Box) ---
-            if (targetLocked && targetBounds != null) {
-                val scaleX = width / 1080f
-                val scaleY = height / 1920f
-                val tLeft = targetBounds.left * scaleX
-                val tTop = targetBounds.top * scaleY
-                val tRight = targetBounds.right * scaleX
-                val tBottom = targetBounds.bottom * scaleY
-                val cornerSize = 25f
+            // --- 2. State-Based Visuals & Locked Box ---
+            when (workflowState) {
+                WorkflowState.SEARCHING -> {
+                    drawCircle(ironManGold, 3f, Offset(centerX, centerY))
+                    drawCircle(color = hudDimGold, radius = 40.dp.toPx(), center = Offset(centerX, centerY), style = Stroke(width = 1f))
+                }
+                WorkflowState.ACQUIRING -> {
+                    drawCircle(color = ironManGold.copy(alpha = pulseAlpha), radius = 70.dp.toPx(), center = Offset(centerX, centerY), style = Stroke(width = 3f))
+                    drawCircle(ironManGold, 5f, Offset(centerX, centerY))
+                }
+                WorkflowState.LOCKED, WorkflowState.FIRING -> {
+                    val bounds = lockedBounds ?: Rect(centerX - 100f, centerY - 100f, centerX + 100f, centerY + 100f)
+                    val scaleX = width / 1080f
+                    val scaleY = height / 1920f
+                    val tLeft = bounds.left * scaleX
+                    val tTop = bounds.top * scaleY
+                    val tRight = bounds.right * scaleX
+                    val tBottom = bounds.bottom * scaleY
+                    val cornerSize = 25f
 
-                val lockColor = hudRed.copy(alpha = pulseAlpha)
+                    val lockColor = hudRed.copy(alpha = pulseAlpha)
 
-                // High-tech target brackets following the person/obstacle
-                // Top-Left
-                drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft + cornerSize, tTop), 5f)
-                drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerSize), 5f)
-                // Top-Right
-                drawLine(lockColor, Offset(tRight, tTop), Offset(tRight - cornerSize, tTop), 5f)
-                drawLine(lockColor, Offset(tRight, tTop), Offset(tRight, tTop + cornerSize), 5f)
-                // Bottom-Left
-                drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft + cornerSize, tBottom), 5f)
-                drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft, tBottom - cornerSize), 5f)
-                // Bottom-Right
-                drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight - cornerSize, tBottom), 5f)
-                drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight, tBottom - cornerSize), 5f)
+                    drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft + cornerSize, tTop), 6f)
+                    drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerSize), 6f)
 
-                // Connecting targeting crosshairs inside target
-                drawLine(lockColor.copy(alpha = 0.3f), Offset(tLeft, (tTop + tBottom) / 2f), Offset(tRight, (tTop + tBottom) / 2f), 1f)
-                drawLine(lockColor.copy(alpha = 0.3f), Offset((tLeft + tRight) / 2f, tTop), Offset((tLeft + tRight) / 2f, tBottom), 1f)
-            } else {
-                // Subtle scanning ring when no target
-                drawCircle(
-                    color = hudDimGold,
-                    radius = 45.dp.toPx(),
-                    center = Offset(centerX, centerY),
-                    style = Stroke(width = 1.5f)
-                )
-                drawCircle(ironManGold, 2f, Offset(centerX, centerY))
+                    drawLine(lockColor, Offset(tRight, tTop), Offset(tRight - cornerSize, tTop), 6f)
+                    drawLine(lockColor, Offset(tRight, tTop), Offset(tRight, tTop + cornerSize), 6f)
+
+                    drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft + cornerSize, tBottom), 6f)
+                    drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft, tBottom - cornerSize), 6f)
+
+                    drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight - cornerSize, tBottom), 6f)
+                    drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight, tBottom - cornerSize), 6f)
+                }
             }
 
-            // --- 3. Cinematic Fire & Spark Explosions AT TARGET EPICENTER ---
-            val epicenterX = if (targetLocked && targetBounds != null) {
+            // --- 3. Cinematic Fire & Spark Explosions AT LOCKED TARGET EPICENTER ---
+            val epicenterX = if (lockedBounds != null) {
                 val scaleX = width / 1080f
-                (targetBounds.left * scaleX + targetBounds.right * scaleX) / 2f
+                (lockedBounds.left * scaleX + lockedBounds.right * scaleX) / 2f
             } else {
                 centerX
             }
 
-            val epicenterY = if (targetLocked && targetBounds != null) {
+            val epicenterY = if (lockedBounds != null) {
                 val scaleY = height / 1920f
-                (targetBounds.top * scaleY + targetBounds.bottom * scaleY) / 2f
+                (lockedBounds.top * scaleY + lockedBounds.bottom * scaleY) / 2f
             } else {
                 centerY
             }
 
             if (showExplosion.value) {
-                // Blinding core flash at target location
                 drawCircle(color = Color.White, radius = 60f, center = Offset(epicenterX, epicenterY))
-                // Shockwave rings at target location
                 drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(epicenterX, epicenterY), style = Stroke(width = 8f))
                 drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.7f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 4f))
             }
@@ -583,7 +620,7 @@ fun IronManHUDOverlay(
             }
         }
 
-        // --- 4. Iron Man HUD Telemetry & Text Overlays ---
+        // --- 4. HUD Telemetry & Instructions ---
         Column(
             modifier = Modifier
                 .padding(70.dp, 35.dp)
@@ -604,9 +641,15 @@ fun IronManHUDOverlay(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "STATUS: [ONLINE - READY]",
-                color = ironManGold,
-                fontSize = 10.sp,
+                text = when (workflowState) {
+                    WorkflowState.SEARCHING -> "STATUS: [IN ATTESA DI TAP]"
+                    WorkflowState.ACQUIRING -> "STATUS: [ACQUISIZIONE...]"
+                    WorkflowState.LOCKED -> "STATUS: [BERSAGLIO TRACCIATO]"
+                    WorkflowState.FIRING -> "STATUS: [FUOCO!]"
+                },
+                color = if (workflowState == WorkflowState.LOCKED) hudRed else ironManGold,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )
         }
@@ -625,33 +668,34 @@ fun IronManHUDOverlay(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "INTEGRITÀ: 100% | ENERGIA: ARC",
+                text = "MODALITÀ: CAMERA FOCUS TAP",
                 color = hudDimGold,
                 fontSize = 11.sp,
-                fontFamily = FontFamily.Monospace
-            )
-            Text(
-                text = "SMART OBJECT TRACKING: ATTIVO",
-                color = ironManGold,
-                fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
             )
         }
 
         Column(
-            modifier = Modifier.padding(bottom = 24.dp).align(Alignment.BottomCenter),
+            modifier = Modifier
+                .padding(bottom = 24.dp)
+                .align(Alignment.BottomCenter),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = if (targetLocked) "BERSAGLIO ACQUISITO // DISTANZA: ${distance}M" else "SCANSIONE OSTACOLI E PERSONE...",
-                color = if (targetLocked) hudRed else ironManGold,
+                text = when (workflowState) {
+                    WorkflowState.SEARCHING -> "[ 1° TAP: AVVIA ACQUISIZIONE ]"
+                    WorkflowState.ACQUIRING -> "[ 2° TAP: LOCKA SUL BERSAGLIO ]"
+                    WorkflowState.LOCKED -> "BERSAGLIO TRACCIATO // DISTANZA: ${distance}M"
+                    WorkflowState.FIRING -> "IMPATTO MISSILE IN CORSO..."
+                },
+                color = if (workflowState == WorkflowState.LOCKED) hudRed else ironManGold,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = if (targetLocked) "[PREMI PLAY/PAUSE NELLE CUFFIE PER FARE FUOCO SUL TARGET]" else "[AVVICINA UNA PERSONA O UN OGGETTO PER ACQUISIRE IL TARGET]",
+                text = "[ 3° TAP O PLAY/PAUSE NELLE CUFFIE = SPARO ]",
                 color = hudDimGold,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
@@ -659,10 +703,3 @@ fun IronManHUDOverlay(
         }
     }
 }
-
-data class CinematicSpark(
-    val angle: Double,
-    val speed: Float,
-    val size: Float,
-    val color: Color
-)

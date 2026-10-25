@@ -1,9 +1,7 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
-- [x] Implement ML Kit shape/object recognition and dynamic tracking in `MainActivity.kt`
-- [x] Implement Iron Man HUD style (no static center box, dynamic locking on closest foreground object)
-- [x] Implement closest-object filtering and precise Italian TTS ("Bersaglio acquisito")
-- [x] Upgrade procedural explosion animation with cinematic fire, shockwaves, and embers
-- [x] **New**: Route AR weapon explosions to detonate directly at the target's coordinates (`targetBounds`)
+- [x] Implement 3-step camera tap workflow (`SEARCHING` -> `ACQUIRING` -> `LOCKED` -> `FIRING`)
+- [x] Implement camera focus/lock sounds and Italian TTS "Bersaglio tracciato" on lock
+- [x] Route explosions to detonate at locked target coordinates
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
