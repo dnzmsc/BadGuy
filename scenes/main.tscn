@@ -1,0 +1,59 @@
+[gd_scene load_steps=6 format=3 uid="a1b2c3d4e5f6a7b8"]
+
+[ext_resource path="res://scripts/main.gd" type="Script" id=1]
+[ext_resource path="res://scripts/tts.gd" type="Script" id=2]
+
+[node name="Main" type="Node2D" script=1]
+node_2d/transform/origin = Vector2(0, 0)
+node_2d/transform/x = Vector2(1, 0)
+node_2d/transform/y = Vector2(0, 1)
+
+[node name="CameraFeed" type="TextureRect" parent="."]
+node_2d/position = Vector2(0, 0)
+node_2d/scale = Vector2(1, 1)
+expand_mode = 3
+stretch_mode = 3
+custom_color/color = Color(0.05, 0.05, 0.05, 1)
+
+[node name="SimulatedTarget" type="ColorRect" parent="."]
+node_2d/position = Vector2(540, 960)
+size = Vector2(40, 40)
+custom_color/color = Color(1, 1, 0, 0.5)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+layer = 1
+
+[node name="HUD/Reticle" type="ColorRect" parent="HUD"]
+node_2d/position = Vector2(540, 960)
+size = Vector2(4, 4)
+custom_color/color = Color(0, 1, 0, 1)
+
+[node name="HUD/TargetBox" type="ColorRect" parent="HUD"]
+node_2d/position = Vector2(540, 960)
+size = Vector2(120, 120)
+custom_color/color = Color(0, 1, 0, 0.25)
+
+[node name="HUD/LaserBeam" type="Line2D" parent="HUD"]
+visible = false
+default_color = Color(0, 1, 0, 1)
+width = 3
+
+[node name="HUD/ExplosionParticles" type="CPUParticles2D" parent="HUD"]
+node_2d/position = Vector2(540, 960)
+emitting = false
+one_shot = true
+amount = 80
+lifetime = 0.8
+lifetime_randomness = 0.4
+speed_scale = 1
+visible = false
+
+[node name="Audio" type="Node" parent="."]
+
+[node name="Audio/Shoot" type="AudioStreamPlayer" parent="Audio"]
+
+[node name="Audio/Explosion" type="AudioStreamPlayer" parent="Audio"]
+
+[node name="Audio/LockOn" type="AudioStreamPlayer" parent="Audio"]
+
+[node name="TTS" type="Node" parent="." script=2]

@@ -1,0 +1,29 @@
+# AI (Kilo) - CAMMO 25/10/2026 - Gitignore ottimizzato per Godot 4
+
+# Godot 4
+.godot/
+.import/
+*.gd3
+*.godot
+*.translation
+*.cnk
+*.ckd
+
+# Export e build
+export/
+build/
+*.apk
+*.aab
+*.pck
+*.zip
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+!.vscode/launch.json
+
+# Temporanei
+*.tmp
+*.log
