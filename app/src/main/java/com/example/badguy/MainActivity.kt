@@ -73,10 +73,10 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     var targetBoundsState = mutableStateOf<Rect?>(null)
         private set
 
-    var targetDistance = mutableStateOf(42)
+    var targetDistance = mutableStateOf(15)
         private set
 
-    var speedKmH = mutableStateOf(28)
+    var speedKmH = mutableStateOf(24)
         private set
 
     private var lastSpokenTargetId = -1
@@ -142,7 +142,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             val result = tts.setLanguage(Locale.ITALIAN)
             if (result != TextToSpeech.LANG_MISSING_DATA && result != TextToSpeech.LANG_NOT_SUPPORTED) {
                 isTtsReady = true
-                speak("Computer di bordo attivo. Armamento: ${weapons[currentWeaponIndex]}")
+                speak("Computer di bordo Iron Man attivo. Armamento: ${weapons[currentWeaponIndex]}")
             }
         }
     }
@@ -161,9 +161,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     fun triggerFire() {
-        fireEventCount.value++
-        playExplosionSound()
-        speak("Bersaglio colpito!")
+        if (targetLockedState.value) {
+            fireEventCount.value++
+            playCinematicExplosionSound()
+            speak("Bersaglio distrutto!")
+        } else {
+            speak("Nessun bersaglio acquisito. Impossibile fare fuoco.")
+            playBeepSound()
+        }
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
@@ -186,29 +191,34 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    fun updateTargetDetection(hasTarget: Boolean, bounds: Rect?, trackingId: Int?) {
+    fun updateTargetDetection(hasTarget: Boolean, bounds: Rect?, trackingId: Int?, distanceMeters: Int) {
         targetLockedState.value = hasTarget
         targetBoundsState.value = bounds
+        targetDistance.value = distanceMeters
 
         if (hasTarget && trackingId != null && trackingId != lastSpokenTargetId) {
             lastSpokenTargetId = trackingId
             speak("Bersaglio acquisito")
+        } else if (!hasTarget) {
+            lastSpokenTargetId = -1
         }
     }
 
-    private fun playExplosionSound() {
+    private fun playCinematicExplosionSound() {
         Thread {
             try {
                 val sampleRate = 44100
-                val numSamples = sampleRate / 2 // ~500ms explosion noise + rumble
+                val numSamples = (sampleRate * 0.7).toInt() // ~700ms cinematic explosion
                 val samples = ShortArray(numSamples)
                 val random = java.util.Random()
                 for (i in 0 until numSamples) {
                     val t = i.toDouble() / sampleRate
                     val envelope = 1.0 - (i.toDouble() / numSamples)
+                    val subBass = sin(2.0 * Math.PI * 50.0 * t) * Math.exp(-t * 3.0)
                     val noise = (random.nextDouble() * 2.0 - 1.0)
-                    val rumble = sin(2.0 * Math.PI * 60.0 * t) * 0.5
-                    samples[i] = ((noise * 0.7 + rumble * 0.3) * 32767 * envelope).toInt().toShort()
+                    val crackle = if (random.nextDouble() > 0.95) (random.nextDouble() * 2.0 - 1.0) * 0.8 else 0.0
+                    val mixed = (subBass * 0.5 + noise * 0.4 + crackle * 0.1)
+                    samples[i] = (mixed * 32767 * envelope).toInt().toShort()
                 }
                 val audioTrack = AudioTrack.Builder()
                     .setAudioAttributes(
@@ -229,7 +239,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     .build()
                 audioTrack.write(samples, 0, samples.size)
                 audioTrack.play()
-                Thread.sleep(550)
+                Thread.sleep(750)
                 audioTrack.release()
             } catch (e: Exception) {
                 e.printStackTrace()
@@ -245,7 +255,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 val samples = ShortArray(numSamples)
                 for (i in 0 until numSamples) {
                     val t = i.toDouble() / sampleRate
-                    samples[i] = (sin(2.0 * Math.PI * 523.25 * t) * 16383).toInt().toShort()
+                    samples[i] = (sin(2.0 * Math.PI * 587.33 * t) * 16383).toInt().toShort()
                 }
                 val audioTrack = AudioTrack.Builder()
                     .setAudioAttributes(
@@ -313,7 +323,7 @@ fun BadGuyARApp(
             .fillMaxSize()
             .background(Color.Black)
     ) {
-        // 1. Camera Feed with Object Analysis
+        // 1. Camera Feed with Smart Object & Person Filtering
         AndroidView(
             factory = { ctx ->
                 PreviewView(ctx).apply {
@@ -333,9 +343,9 @@ fun BadGuyARApp(
                     .build()
 
                 imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                    processImageProxy(objectDetector, imageProxy) { hasTarget, bounds, trackingId ->
+                    processImageProxy(objectDetector, imageProxy) { hasTarget, bounds, trackingId, dist ->
                         activity?.runOnUiThread {
-                            activity.updateTargetDetection(hasTarget, bounds, trackingId)
+                            activity.updateTargetDetection(hasTarget, bounds, trackingId, dist)
                         }
                     }
                 }
@@ -355,8 +365,8 @@ fun BadGuyARApp(
             }, ContextCompat.getMainExecutor(context))
         }
 
-        // 2. Advanced Military HUD & Real Fire Explosions
-        MilitaryHUDOverlay(
+        // 2. Iron Man Style HUD & Cinematic Explosions
+        IronManHUDOverlay(
             currentWeapon = currentWeapon,
             fireCount = fireCount,
             targetLocked = targetLocked,
@@ -373,24 +383,39 @@ fun BadGuyARApp(
 private fun processImageProxy(
     detector: com.google.mlkit.vision.objects.ObjectDetector,
     imageProxy: ImageProxy,
-    onResult: (Boolean, Rect?, Int?) -> Unit
+    onResult: (Boolean, Rect?, Int?, Int) -> Unit
 ) {
     val mediaImage = imageProxy.image
     if (mediaImage != null) {
         val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
         detector.process(image)
             .addOnSuccessListener { objects ->
-                if (objects.isNotEmpty()) {
-                    val obj = objects[0]
+                val validObjects = objects.filter { obj ->
                     val bb = obj.boundingBox
-                    val rect = Rect(bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat())
-                    onResult(true, rect, obj.trackingId)
+                    val area = (bb.width() * bb.height()).toFloat()
+                    val totalArea = (mediaImage.width * mediaImage.height).toFloat()
+                    area >= (totalArea * 0.04f)
+                }
+
+                if (validObjects.isNotEmpty()) {
+                    val closestObj = validObjects.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+                    if (closestObj != null) {
+                        val bb = closestObj.boundingBox
+                        val rect = Rect(bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat())
+                        
+                        val areaRatio = (bb.width() * bb.height()).toFloat() / (mediaImage.width * mediaImage.height).toFloat()
+                        val estimatedDistance = maxOf(2f, (25f * (1f - areaRatio))).toInt()
+
+                        onResult(true, rect, closestObj.trackingId, estimatedDistance)
+                    } else {
+                        onResult(false, null, null, 15)
+                    }
                 } else {
-                    onResult(false, null, null)
+                    onResult(false, null, null, 15)
                 }
             }
             .addOnFailureListener {
-                onResult(false, null, null)
+                onResult(false, null, null, 15)
             }
             .addOnCompleteListener {
                 imageProxy.close()
@@ -401,7 +426,7 @@ private fun processImageProxy(
 }
 
 @Composable
-fun MilitaryHUDOverlay(
+fun IronManHUDOverlay(
     currentWeapon: String,
     fireCount: Int,
     targetLocked: Boolean,
@@ -410,52 +435,51 @@ fun MilitaryHUDOverlay(
     speed: Int,
     onScreenTap: () -> Unit
 ) {
-    val neonGreen = Color(0xFF00FF66)
-    val hudDimGreen = Color(0x8800FF66)
-    val hudRed = Color(0xFFFF3333)
-    val fireOrange = Color(0xFFFF9900)
+    val ironManGold = Color(0xFFFFCC00)
+    val hudDimGold = Color(0x66FFCC00)
+    val hudRed = Color(0xFFFF2222)
+    val fireOrange = Color(0xFFFF8800)
     val fireYellow = Color(0xFFFFEE00)
 
-    val infiniteTransition = rememberInfiniteTransition(label = "hud")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.95f,
-        targetValue = 1.05f,
+    val infiniteTransition = rememberInfiniteTransition(label = "ironman_hud")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.6f,
+        targetValue = 1.0f,
         animationSpec = infiniteRepeatable(
-            animation = tween(800, easing = FastOutSlowInEasing),
+            animation = tween(600, easing = FastOutSlowInEasing),
             repeatMode = RepeatMode.Reverse
         ),
-        label = "pulseScale"
+        label = "pulseAlpha"
     )
 
-    // Advanced Fire & Particle Explosion state
-    var explosionParticles by remember { mutableStateOf(listOf<FireParticle>()) }
-    var shockwaveRadius by remember { mutableStateOf(0f) }
-    var showExplosionFlash by remember { mutableStateOf(false) }
+    val explosionParticles = remember { mutableStateOf(listOf<CinematicSpark>()) }
+    val shockwaveRadius = remember { mutableStateOf(0f) }
+    val showExplosion = remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(fireCount) {
         if (fireCount > 0) {
-            showExplosionFlash = true
-            shockwaveRadius = 20f
-            
-            val newParticles = (0..60).map {
-                FireParticle(
+            showExplosion.value = true
+            shockwaveRadius.value = 10f
+
+            val sparks = (0..90).map {
+                CinematicSpark(
                     angle = Random.nextDouble(0.0, 2.0 * Math.PI),
-                    speed = Random.nextFloat() * 25f + 8f,
-                    size = Random.nextFloat() * 10f + 3f,
-                    color = listOf(fireOrange, fireYellow, hudRed, Color.White).random()
+                    speed = Random.nextFloat() * 30f + 10f,
+                    size = Random.nextFloat() * 12f + 4f,
+                    color = listOf(fireOrange, fireYellow, hudRed, Color.White, ironManGold).random()
                 )
             }
-            explosionParticles = newParticles
+            explosionParticles.value = sparks
 
             scope.launch {
-                repeat(15) {
-                    delay(30)
-                    shockwaveRadius += 15f
+                repeat(20) {
+                    delay(25)
+                    shockwaveRadius.value += 18f
                 }
-                showExplosionFlash = false
-                delay(200)
-                explosionParticles = emptyList()
+                showExplosion.value = false
+                delay(250)
+                explosionParticles.value = emptyList()
             }
         }
     }
@@ -471,23 +495,24 @@ fun MilitaryHUDOverlay(
             val centerX = width / 2f
             val centerY = height / 2f
 
-            // --- 1. Starfighter Crosshair / Reticle ---
-            val reticleRadius = 60.dp.toPx() * pulseScale
-            drawCircle(
-                color = hudDimGreen,
-                radius = reticleRadius,
-                center = Offset(centerX, centerY),
-                style = Stroke(width = 2f)
-            )
+            // --- 1. Iron Man Helmet Corners & Arc Reactor HUD lines ---
+            val bracketLen = 120f
+            val strokeW = 3f
 
-            drawLine(neonGreen, Offset(centerX - reticleRadius - 15f, centerY), Offset(centerX - reticleRadius + 10f, centerY), 3f)
-            drawLine(neonGreen, Offset(centerX + reticleRadius - 10f, centerY), Offset(centerX + reticleRadius + 15f, centerY), 3f)
-            drawLine(neonGreen, Offset(centerX, centerY - reticleRadius - 15f), Offset(centerX, centerY - reticleRadius + 10f), 3f)
-            drawLine(neonGreen, Offset(centerX, centerY + reticleRadius - 10f), Offset(centerX, centerY + reticleRadius + 15f), 3f)
+            // Top-Left
+            drawLine(hudDimGold, Offset(50f, 50f), Offset(50f + bracketLen, 50f), strokeW)
+            drawLine(hudDimGold, Offset(50f, 50f), Offset(50f, 50f + bracketLen), strokeW)
+            // Top-Right
+            drawLine(hudDimGold, Offset(width - 50f, 50f), Offset(width - 50f - bracketLen, 50f), strokeW)
+            drawLine(hudDimGold, Offset(width - 50f, 50f), Offset(width - 50f, 50f + bracketLen), strokeW)
+            // Bottom-Left
+            drawLine(hudDimGold, Offset(50f, height - 50f), Offset(50f + bracketLen, height - 50f), strokeW)
+            drawLine(hudDimGold, Offset(50f, height - 50f), Offset(50f, height - 50f - bracketLen), strokeW)
+            // Bottom-Right
+            drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f - bracketLen, height - 50f), strokeW)
+            drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f, height - 50f - bracketLen), strokeW)
 
-            drawCircle(neonGreen, 3f, Offset(centerX, centerY))
-
-            // --- 2. Dynamic Tracking Target Box (Following recognized shape) ---
+            // --- 2. Dynamic Target Locking (Iron Man Style Box) ---
             if (targetLocked && targetBounds != null) {
                 val scaleX = width / 1080f
                 val scaleY = height / 1920f
@@ -495,89 +520,78 @@ fun MilitaryHUDOverlay(
                 val tTop = targetBounds.top * scaleY
                 val tRight = targetBounds.right * scaleX
                 val tBottom = targetBounds.bottom * scaleY
-                val cornerLen = 20f
+                val cornerSize = 25f
 
-                val boxColor = hudRed
-                drawLine(boxColor, Offset(tLeft, tTop), Offset(tLeft + cornerLen, tTop), 4f)
-                drawLine(boxColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerLen), 4f)
+                val lockColor = hudRed.copy(alpha = pulseAlpha)
 
-                drawLine(boxColor, Offset(tRight, tTop), Offset(tRight - cornerLen, tTop), 4f)
-                drawLine(boxColor, Offset(tRight, tTop), Offset(tRight, tTop + cornerLen), 4f)
+                // High-tech target brackets following the person/obstacle
+                // Top-Left
+                drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft + cornerSize, tTop), 5f)
+                drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerSize), 5f)
+                // Top-Right
+                drawLine(lockColor, Offset(tRight, tTop), Offset(tRight - cornerSize, tTop), 5f)
+                drawLine(lockColor, Offset(tRight, tTop), Offset(tRight, tTop + cornerSize), 5f)
+                // Bottom-Left
+                drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft + cornerSize, tBottom), 5f)
+                drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft, tBottom - cornerSize), 5f)
+                // Bottom-Right
+                drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight - cornerSize, tBottom), 5f)
+                drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight, tBottom - cornerSize), 5f)
 
-                drawLine(boxColor, Offset(tLeft, tBottom), Offset(tLeft + cornerLen, tBottom), 4f)
-                drawLine(boxColor, Offset(tLeft, tBottom), Offset(tLeft, tBottom - cornerLen), 4f)
-
-                drawLine(boxColor, Offset(tRight, tBottom), Offset(tRight - cornerLen, tBottom), 4f)
-                drawLine(boxColor, Offset(tRight, tBottom), Offset(tRight, tBottom - cornerLen), 4f)
+                // Connecting targeting crosshairs inside target
+                drawLine(lockColor.copy(alpha = 0.3f), Offset(tLeft, (tTop + tBottom) / 2f), Offset(tRight, (tTop + tBottom) / 2f), 1f)
+                drawLine(lockColor.copy(alpha = 0.3f), Offset((tLeft + tRight) / 2f, tTop), Offset((tLeft + tRight) / 2f, tBottom), 1f)
             } else {
-                val targetBoxSize = 120.dp.toPx()
-                val tLeft = centerX - targetBoxSize / 2f
-                val tTop = centerY - targetBoxSize / 2f
-                val cornerLen = 25f
-                val boxColor = neonGreen
-
-                drawLine(boxColor, Offset(tLeft, tTop), Offset(tLeft + cornerLen, tTop), 4f)
-                drawLine(boxColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerLen), 4f)
-                drawLine(boxColor, Offset(tLeft + targetBoxSize, tTop), Offset(tLeft + targetBoxSize - cornerLen, tTop), 4f)
-                drawLine(boxColor, Offset(tLeft + targetBoxSize, tTop), Offset(tLeft + targetBoxSize, tTop + cornerLen), 4f)
-                drawLine(boxColor, Offset(tLeft, tTop + targetBoxSize), Offset(tLeft + cornerLen, tTop + targetBoxSize), 4f)
-                drawLine(boxColor, Offset(tLeft, tTop + targetBoxSize), Offset(tLeft, tTop + targetBoxSize - cornerLen), 4f)
-                drawLine(boxColor, Offset(tLeft + targetBoxSize, tTop + targetBoxSize), Offset(tLeft + targetBoxSize - cornerLen, tTop + targetBoxSize), 4f)
-                drawLine(boxColor, Offset(tLeft + targetBoxSize, tTop + targetBoxSize), Offset(tLeft + targetBoxSize, tTop + targetBoxSize - cornerLen), 4f)
+                // Subtle scanning ring when no target
+                drawCircle(
+                    color = hudDimGold,
+                    radius = 45.dp.toPx(),
+                    center = Offset(centerX, centerY),
+                    style = Stroke(width = 1.5f)
+                )
+                drawCircle(ironManGold, 2f, Offset(centerX, centerY))
             }
 
-            // Screen corner military brackets
-            val bracketLen = 110f
-            drawLine(hudDimGreen, Offset(40f, 40f), Offset(40f + bracketLen, 40f), 2f)
-            drawLine(hudDimGreen, Offset(40f, 40f), Offset(40f, 40f + bracketLen), 2f)
-
-            drawLine(hudDimGreen, Offset(width - 40f, 40f), Offset(width - 40f - bracketLen, 40f), 2f)
-            drawLine(hudDimGreen, Offset(width - 40f, 40f), Offset(width - 40f, 40f + bracketLen), 2f)
-
-            drawLine(hudDimGreen, Offset(40f, height - 40f), Offset(40f + bracketLen, height - 40f), 2f)
-            drawLine(hudDimGreen, Offset(40f, height - 40f), Offset(40f, height - 40f - bracketLen), 2f)
-
-            drawLine(hudDimGreen, Offset(width - 40f, height - 40f), Offset(width - 40f - bracketLen, height - 40f), 2f)
-            drawLine(hudDimGreen, Offset(width - 40f, height - 40f), Offset(width - 40f, height - 40f - bracketLen), 2f)
-
-            // --- 3. Advanced Realistic Fire & Particle Explosions ---
-            if (showExplosionFlash) {
-                drawCircle(color = Color.White, radius = 45f, center = Offset(centerX, centerY))
-                drawCircle(color = fireOrange, radius = shockwaveRadius, center = Offset(centerX, centerY), style = Stroke(width = 6f))
-                drawCircle(color = fireYellow, radius = shockwaveRadius * 0.7f, center = Offset(centerX, centerY), style = Stroke(width = 3f))
+            // --- 3. Cinematic Fire & Spark Explosions ---
+            if (showExplosion.value) {
+                // Blinding core flash
+                drawCircle(color = Color.White, radius = 60f, center = Offset(centerX, centerY))
+                // Shockwave rings
+                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(centerX, centerY), style = Stroke(width = 8f))
+                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.7f, center = Offset(centerX, centerY), style = Stroke(width = 4f))
             }
 
-            explosionParticles.forEach { p ->
-                val dist = p.speed * 30f
+            explosionParticles.value.forEach { p ->
+                val dist = p.speed * 35f
                 val px = centerX + (cos(p.angle) * dist).toFloat()
                 val py = centerY + (sin(p.angle) * dist).toFloat()
                 drawCircle(color = p.color, radius = p.size, center = Offset(px, py))
             }
         }
 
-        // --- 4. HUD Telemetry & Text Overlays ---
+        // --- 4. Iron Man HUD Telemetry & Text Overlays ---
         Column(
             modifier = Modifier
-                .padding(60.dp, 30.dp)
+                .padding(70.dp, 35.dp)
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "SISTEMA D'ARMA",
-                color = hudDimGreen,
+                text = "JARVIS // TACTICAL HUD",
+                color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )
             Text(
                 text = currentWeapon.uppercase(),
-                color = neonGreen,
+                color = ironManGold,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.ExtraBold,
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "STATO: [ONLINE - PRONTO]",
-                color = neonGreen,
+                text = "STATUS: [ONLINE - READY]",
+                color = ironManGold,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
             )
@@ -585,26 +599,26 @@ fun MilitaryHUDOverlay(
 
         Column(
             modifier = Modifier
-                .padding(60.dp, 30.dp)
+                .padding(70.dp, 35.dp)
                 .align(Alignment.TopEnd),
             horizontalAlignment = Alignment.End
         ) {
             Text(
                 text = "VELOCITÀ: $speed KM/H",
-                color = neonGreen,
+                color = ironManGold,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.ExtraBold,
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "SCUDI: 100% | SCAFO: 100%",
-                color = hudDimGreen,
+                text = "INTEGRITÀ: 100% | ENERGIA: ARC",
+                color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "AI OBJECT TRACKING: ATTIVO",
-                color = neonGreen,
+                text = "SMART OBJECT TRACKING: ATTIVO",
+                color = ironManGold,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
             )
@@ -617,16 +631,16 @@ fun MilitaryHUDOverlay(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Text(
-                text = if (targetLocked) "BERSAGLIO ACQUISITO // DISTANZA: ${distance}M" else "RICERCA BERSAGLI IN CORSO...",
-                color = if (targetLocked) hudRed else neonGreen,
+                text = if (targetLocked) "BERSAGLIO ACQUISITO // DISTANZA: ${distance}M" else "SCANSIONE OSTACOLI E PERSONE...",
+                color = if (targetLocked) hudRed else ironManGold,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 fontFamily = FontFamily.Monospace
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "[CUFFIE PLAY/PAUSE = SPARO] | [VOLUME +/- = CAMBIO ARMA]",
-                color = hudDimGreen,
+                text = if (targetLocked) "[PREMI PLAY/PAUSE NELLE CUFFIE PER FARE FUOCO]" else "[AVVICINA UNA PERSONA O UN OGGETTO PER ACQUISIRE IL TARGET]",
+                color = hudDimGold,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
             )
@@ -634,7 +648,7 @@ fun MilitaryHUDOverlay(
     }
 }
 
-data class FireParticle(
+data class CinematicSpark(
     val angle: Double,
     val speed: Float,
     val size: Float,

@@ -1,7 +1,9 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
 - [x] Implement ML Kit shape/object recognition and dynamic tracking in `MainActivity.kt`
-- [x] Implement Italian TTS voice feedback ("Bersaglio acquisito" on recognition)
-- [x] Implement advanced fire & spark particle explosion effects
+- [x] Implement Iron Man HUD style (no static center box, dynamic locking on closest foreground object)
+- [x] Implement closest-object filtering and precise Italian TTS ("Bersaglio acquisito")
+- [x] Upgrade procedural explosion animation with cinematic fire, shockwaves, and embers
+- [x] Upgrade AudioTrack synthesis with cinematic sub-bass explosion rumble and layered laser SFX
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
