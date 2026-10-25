@@ -1,59 +1,64 @@
-[gd_scene load_steps=6 format=3 uid="a1b2c3d4e5f6a7b8"]
+[gd_scene load_steps=2 format=3]
 
-[ext_resource path="res://scripts/main.gd" type="Script" id=1]
-[ext_resource path="res://scripts/tts.gd" type="Script" id=2]
+[ext_resource type="Script" path="res://scripts/main.gd" id="1"]
+[ext_resource type="Script" path="res://scripts/tts.gd" id="2"]
 
-[node name="Main" type="Node2D" script=1]
-node_2d/transform/origin = Vector2(0, 0)
-node_2d/transform/x = Vector2(1, 0)
-node_2d/transform/y = Vector2(0, 1)
+[node name="Main" type="Node2D"]
+script = ExtResource("1")
+
+[node name="BgFallback" type="ColorRect" parent="."]
+color = Color(0.05, 0.08, 0.12, 1)
 
 [node name="CameraFeed" type="TextureRect" parent="."]
-node_2d/position = Vector2(0, 0)
-node_2d/scale = Vector2(1, 1)
-expand_mode = 3
-stretch_mode = 3
-custom_color/color = Color(0.05, 0.05, 0.05, 1)
+expand_mode = 1
+stretch_mode = 6
+
+[node name="StatusLabel" type="Label" parent="."]
+text = "BADGUY AR - Inizializzazione..."
+
+[node name="HUD" type="Node2D" parent="."]
+
+[node name="TargetBox" type="ColorRect" parent="HUD"]
+size = Vector2(100, 100)
+color = Color(0, 1, 0, 0.3)
+
+[node name="ReticleTop" type="ColorRect" parent="HUD"]
+size = Vector2(2, 40)
+color = Color(0, 1, 0, 1)
+
+[node name="ReticleBottom" type="ColorRect" parent="HUD"]
+size = Vector2(2, 40)
+color = Color(0, 1, 0, 1)
+
+[node name="ReticleLeft" type="ColorRect" parent="HUD"]
+size = Vector2(40, 2)
+color = Color(0, 1, 0, 1)
+
+[node name="ReticleRight" type="ColorRect" parent="HUD"]
+size = Vector2(40, 2)
+color = Color(0, 1, 0, 1)
+
+[node name="LaserLeft" type="Line2D" parent="HUD"]
+visible = false
+width = 3.0
+
+[node name="LaserRight" type="Line2D" parent="HUD"]
+visible = false
+width = 3.0
+
+[node name="ExplosionParticles" type="CPUParticles2D" parent="HUD"]
 
 [node name="SimulatedTarget" type="ColorRect" parent="."]
-node_2d/position = Vector2(540, 960)
-size = Vector2(40, 40)
-custom_color/color = Color(1, 1, 0, 0.5)
-
-[node name="HUD" type="CanvasLayer" parent="."]
-layer = 1
-
-[node name="HUD/Reticle" type="ColorRect" parent="HUD"]
-node_2d/position = Vector2(540, 960)
-size = Vector2(4, 4)
-custom_color/color = Color(0, 1, 0, 1)
-
-[node name="HUD/TargetBox" type="ColorRect" parent="HUD"]
-node_2d/position = Vector2(540, 960)
-size = Vector2(120, 120)
-custom_color/color = Color(0, 1, 0, 0.25)
-
-[node name="HUD/LaserBeam" type="Line2D" parent="HUD"]
-visible = false
-default_color = Color(0, 1, 0, 1)
-width = 3
-
-[node name="HUD/ExplosionParticles" type="CPUParticles2D" parent="HUD"]
-node_2d/position = Vector2(540, 960)
-emitting = false
-one_shot = true
-amount = 80
-lifetime = 0.8
-lifetime_randomness = 0.4
-speed_scale = 1
-visible = false
+size = Vector2(24, 24)
+color = Color(1, 1, 0, 1)
 
 [node name="Audio" type="Node" parent="."]
 
-[node name="Audio/Shoot" type="AudioStreamPlayer" parent="Audio"]
+[node name="Shoot" type="AudioStreamPlayer" parent="Audio"]
 
-[node name="Audio/Explosion" type="AudioStreamPlayer" parent="Audio"]
+[node name="Explosion" type="AudioStreamPlayer" parent="Audio"]
 
-[node name="Audio/LockOn" type="AudioStreamPlayer" parent="Audio"]
+[node name="LockOn" type="AudioStreamPlayer" parent="Audio"]
 
-[node name="TTS" type="Node" parent="." script=2]
+[node name="TTS" type="Node" parent="."]
+script = ExtResource("2")
