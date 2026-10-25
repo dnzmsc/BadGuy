@@ -1,6 +1,7 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
-- [x] Implement 3-step camera tap workflow (`SEARCHING` -> `ACQUIRING` -> `LOCKED` -> `FIRING`)
-- [x] **New**: Implement dynamic target tracking in `LOCKED` state and "Bersaglio perso" announcement when target leaves the screen
+- [x] Implement continuous shape recognition and passive detection notification
+- [x] Implement single tap (Lock / Fire) and double tap (Unlock) gesture workflow
+- [x] Route explosions to detonate at locked target coordinates
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)

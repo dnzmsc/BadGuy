@@ -21,7 +21,7 @@ import androidx.camera.view.PreviewView
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -31,6 +31,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -55,7 +56,6 @@ import kotlin.random.Random
 
 enum class WorkflowState {
     SEARCHING,
-    ACQUIRING,
     LOCKED,
     FIRING
 }
@@ -96,7 +96,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     var speedKmH = mutableStateOf(24)
         private set
 
-    private var framesWithoutTarget = 0
+    private var lastNotifiedTargetId = -1
     private val analysisExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -126,7 +126,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
                             KeyEvent.KEYCODE_HEADSETHOOK,
                             KeyEvent.KEYCODE_MEDIA_PLAY -> {
-                                runOnUiThread { handleTapWorkflow() }
+                                runOnUiThread { handleSingleTap() }
                                 return true
                             }
                         }
@@ -146,10 +146,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 currentWeapon = weapons[currentWeaponIndex],
                 workflowState = workflowState,
                 fireCount = fireEventCount.value,
+                detectedBounds = currentDetectedBounds.value,
                 lockedBounds = lockedBoundsState.value,
                 distance = targetDistance.value,
                 speed = speedKmH.value,
-                onScreenTap = { handleTapWorkflow() }
+                onSingleTap = { handleSingleTap() },
+                onDoubleTap = { handleDoubleTap() }
             )
         }
     }
@@ -177,17 +179,12 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         playBeepSound(400.0, 100)
     }
 
-    fun handleTapWorkflow() {
+    fun handleSingleTap() {
         when (workflowState) {
             WorkflowState.SEARCHING -> {
-                workflowState = WorkflowState.ACQUIRING
-                playCameraScanSound()
-            }
-            WorkflowState.ACQUIRING -> {
                 val targetToLock = currentDetectedBounds.value ?: Rect(300f, 600f, 780f, 1320f)
                 lockedBoundsState.value = targetToLock
                 workflowState = WorkflowState.LOCKED
-                framesWithoutTarget = 0
                 playCameraLockSound()
                 speak("Bersaglio tracciato")
             }
@@ -207,6 +204,15 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
+    fun handleDoubleTap() {
+        if (workflowState == WorkflowState.LOCKED) {
+            lockedBoundsState.value = null
+            workflowState = WorkflowState.SEARCHING
+            playBeepSound(600.0, 80)
+            speak("Bersaglio sbloccato")
+        }
+    }
+
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         return when (keyCode) {
             KeyEvent.KEYCODE_VOLUME_UP -> {
@@ -220,43 +226,37 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
             KeyEvent.KEYCODE_HEADSETHOOK,
             KeyEvent.KEYCODE_MEDIA_NEXT -> {
-                handleTapWorkflow()
+                handleSingleTap()
                 true
             }
             else -> super.onKeyDown(keyCode, event)
         }
     }
 
-    fun updateTargetDetection(bounds: Rect?, distanceMeters: Int) {
+    fun updateTargetDetection(bounds: Rect?, trackingId: Int?, distanceMeters: Int) {
         currentDetectedBounds.value = bounds
         targetDistance.value = distanceMeters
 
+        if (workflowState == WorkflowState.SEARCHING && bounds != null && trackingId != null && trackingId != lastNotifiedTargetId) {
+            lastNotifiedTargetId = trackingId
+            playCameraFocusSound()
+        }
+
         if (workflowState == WorkflowState.LOCKED) {
             if (bounds != null) {
-                // Dynamically update locked bounds to track the moving target across the screen
                 lockedBoundsState.value = bounds
-                framesWithoutTarget = 0
-            } else {
-                framesWithoutTarget++
-                if (framesWithoutTarget > 20) { // ~0.6 seconds of losing target
-                    speak("Bersaglio perso")
-                    lockedBoundsState.value = null
-                    workflowState = WorkflowState.SEARCHING
-                    framesWithoutTarget = 0
-                }
             }
         }
     }
 
-    private fun playCameraScanSound() {
+    private fun playCameraFocusSound() {
         Thread {
             try {
                 val sampleRate = 44100
-                val numSamples = sampleRate / 6
+                val numSamples = sampleRate / 15
                 val samples = ShortArray(numSamples)
                 for (i in 0 until numSamples) {
-                    val t = i.toDouble() / sampleRate
-                    samples[i] = (sin(2.0 * Math.PI * 880.0 * t) * 12000).toInt().toShort()
+                    samples[i] = (sin(2.0 * Math.PI * 1046.5 * i / sampleRate) * 6000).toInt().toShort()
                 }
                 playAudioSamples(samples)
             } catch (e: Exception) {
@@ -367,10 +367,12 @@ fun BadGuyARApp(
     currentWeapon: String,
     workflowState: WorkflowState,
     fireCount: Int,
+    detectedBounds: Rect?,
     lockedBounds: Rect?,
     distance: Int,
     speed: Int,
-    onScreenTap: () -> Unit
+    onSingleTap: () -> Unit,
+    onDoubleTap: () -> Unit
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -410,9 +412,9 @@ fun BadGuyARApp(
                     .build()
 
                 imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                    processImageProxy(objectDetector, imageProxy) { bounds, dist ->
+                    processImageProxy(objectDetector, imageProxy) { bounds, trackingId, dist ->
                         activity?.runOnUiThread {
-                            activity.updateTargetDetection(bounds, dist)
+                            activity.updateTargetDetection(bounds, trackingId, dist)
                         }
                     }
                 }
@@ -436,10 +438,12 @@ fun BadGuyARApp(
             currentWeapon = currentWeapon,
             workflowState = workflowState,
             fireCount = fireCount,
+            detectedBounds = detectedBounds,
             lockedBounds = lockedBounds,
             distance = distance,
             speed = speed,
-            onScreenTap = onScreenTap
+            onSingleTap = onSingleTap,
+            onDoubleTap = onDoubleTap
         )
     }
 }
@@ -449,7 +453,7 @@ fun BadGuyARApp(
 private fun processImageProxy(
     detector: com.google.mlkit.vision.objects.ObjectDetector,
     imageProxy: ImageProxy,
-    onResult: (Rect?, Int) -> Unit
+    onResult: (Rect?, Int?, Int) -> Unit
 ) {
     val mediaImage = imageProxy.image
     if (mediaImage != null) {
@@ -463,16 +467,16 @@ private fun processImageProxy(
                         val rect = Rect(bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat())
                         val areaRatio = (bb.width() * bb.height()).toFloat() / (mediaImage.width * mediaImage.height).toFloat()
                         val estimatedDistance = maxOf(2f, (25f * (1f - areaRatio))).toInt()
-                        onResult(rect, estimatedDistance)
+                        onResult(rect, closestObj.trackingId, estimatedDistance)
                     } else {
-                        fallbackCenter(mediaImage, onResult)
+                        onResult(null, null, 15)
                     }
                 } else {
-                    fallbackCenter(mediaImage, onResult)
+                    onResult(null, null, 15)
                 }
             }
             .addOnFailureListener {
-                fallbackCenter(mediaImage, onResult)
+                onResult(null, null, 15)
             }
             .addOnCompleteListener {
                 imageProxy.close()
@@ -482,22 +486,17 @@ private fun processImageProxy(
     }
 }
 
-private fun fallbackCenter(mediaImage: android.media.Image, onResult: (Rect?, Int) -> Unit) {
-    val w = mediaImage.width.toFloat()
-    val h = mediaImage.height.toFloat()
-    val rect = Rect(w * 0.3f, h * 0.3f, w * 0.7f, h * 0.7f)
-    onResult(rect, 10)
-}
-
 @Composable
 fun CameraWorkflowHUD(
     currentWeapon: String,
     workflowState: WorkflowState,
     fireCount: Int,
+    detectedBounds: Rect?,
     lockedBounds: Rect?,
     distance: Int,
     speed: Int,
-    onScreenTap: () -> Unit
+    onSingleTap: () -> Unit,
+    onDoubleTap: () -> Unit
 ) {
     val ironManGold = Color(0xFFFFCC00)
     val hudDimGold = Color(0x66FFCC00)
@@ -551,7 +550,12 @@ fun CameraWorkflowHUD(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .clickable(onClick = onScreenTap)
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = { onSingleTap() },
+                    onDoubleTap = { onDoubleTap() }
+                )
+            }
     ) {
         Canvas(modifier = Modifier.fillMaxSize()) {
             val width = size.width
@@ -574,15 +578,31 @@ fun CameraWorkflowHUD(
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f - bracketLen, height - 50f), strokeW)
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f, height - 50f - bracketLen), strokeW)
 
-            // --- 2. State-Based Visuals & Locked Box ---
+            // --- 2. State-Based Visuals & Passive Detection ---
             when (workflowState) {
                 WorkflowState.SEARCHING -> {
-                    drawCircle(ironManGold, 3f, Offset(centerX, centerY))
-                    drawCircle(color = hudDimGold, radius = 40.dp.toPx(), center = Offset(centerX, centerY), style = Stroke(width = 1f))
-                }
-                WorkflowState.ACQUIRING -> {
-                    drawCircle(color = ironManGold.copy(alpha = pulseAlpha), radius = 70.dp.toPx(), center = Offset(centerX, centerY), style = Stroke(width = 3f))
-                    drawCircle(ironManGold, 5f, Offset(centerX, centerY))
+                    if (detectedBounds != null) {
+                        val scaleX = width / 1080f
+                        val scaleY = height / 1920f
+                        val dLeft = detectedBounds.left * scaleX
+                        val dTop = detectedBounds.top * scaleY
+                        val dRight = detectedBounds.right * scaleX
+                        val dBottom = detectedBounds.bottom * scaleY
+                        val cornerSize = 20f
+                        val highlightColor = ironManGold.copy(alpha = pulseAlpha)
+
+                        drawLine(highlightColor, Offset(dLeft, dTop), Offset(dLeft + cornerSize, dTop), 4f)
+                        drawLine(highlightColor, Offset(dLeft, dTop), Offset(dLeft, dTop + cornerSize), 4f)
+                        drawLine(highlightColor, Offset(dRight, dTop), Offset(dRight - cornerSize, dTop), 4f)
+                        drawLine(highlightColor, Offset(dRight, dTop), Offset(dRight, dTop + cornerSize), 4f)
+                        drawLine(highlightColor, Offset(dLeft, dBottom), Offset(dLeft + cornerSize, dBottom), 4f)
+                        drawLine(highlightColor, Offset(dLeft, dBottom), Offset(dLeft, dBottom - cornerSize), 4f)
+                        drawLine(highlightColor, Offset(dRight, dBottom), Offset(dRight - cornerSize, dBottom), 4f)
+                        drawLine(highlightColor, Offset(dRight, dBottom), Offset(dRight, dBottom - cornerSize), 4f)
+                    } else {
+                        drawCircle(ironManGold, 3f, Offset(centerX, centerY))
+                        drawCircle(color = hudDimGold, radius = 40.dp.toPx(), center = Offset(centerX, centerY), style = Stroke(width = 1f))
+                    }
                 }
                 WorkflowState.LOCKED, WorkflowState.FIRING -> {
                     val bounds = lockedBounds ?: Rect(centerX - 100f, centerY - 100f, centerX + 100f, centerY + 100f)
@@ -661,8 +681,7 @@ fun CameraWorkflowHUD(
             )
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> "STATUS: [IN ATTESA DI TAP]"
-                    WorkflowState.ACQUIRING -> "STATUS: [ACQUISIZIONE...]"
+                    WorkflowState.SEARCHING -> if (detectedBounds != null) "STATUS: [BERSAGLIO RILEVATO]" else "STATUS: [RICERCA IN CORSO...]"
                     WorkflowState.LOCKED -> "STATUS: [BERSAGLIO TRACCIATO]"
                     WorkflowState.FIRING -> "STATUS: [FUOCO!]"
                 },
@@ -687,7 +706,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "MODALITÀ: CAMERA FOCUS TAP",
+                text = "MODALITÀ: CONTINUOUS AI SCAN",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -702,8 +721,7 @@ fun CameraWorkflowHUD(
         ) {
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> "[ 1° TAP: AVVIA ACQUISIZIONE ]"
-                    WorkflowState.ACQUIRING -> "[ 2° TAP: LOCKA SUL BERSAGLIO ]"
+                    WorkflowState.SEARCHING -> if (detectedBounds != null) "[ 1° TAP: LOCKA SUL BERSAGLIO RILEVATO ]" else "CERCA FORME O PERSONE NELL'INQUADRATURA..."
                     WorkflowState.LOCKED -> "BERSAGLIO TRACCIATO // DISTANZA: ${distance}M"
                     WorkflowState.FIRING -> "IMPATTO MISSILE IN CORSO..."
                 },
@@ -714,7 +732,11 @@ fun CameraWorkflowHUD(
             )
             Spacer(modifier = Modifier.height(4.dp))
             Text(
-                text = "[ 3° TAP O PLAY/PAUSE NELLE CUFFIE = SPARO ]",
+                text = when (workflowState) {
+                    WorkflowState.SEARCHING -> "[ 2° TAP RAPIDO (DOPPIO TAP) = SBLOCCA ]"
+                    WorkflowState.LOCKED -> "[ 1° TAP = SPARO ] | [ DOPPIO TAP = SBLOCCA ]"
+                    WorkflowState.FIRING -> "MISSILE IN VOLO..."
+                },
                 color = hudDimGold,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace
