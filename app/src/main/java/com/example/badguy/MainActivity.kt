@@ -13,8 +13,6 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
-import androidx.camera.core.ImageAnalysis
-import androidx.camera.core.ImageProxy
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
@@ -28,7 +26,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -43,13 +40,9 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import com.google.mlkit.vision.common.InputImage
-import com.google.mlkit.vision.objects.ObjectDetection
-import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.Locale
-import java.util.concurrent.Executors
 import kotlin.math.cos
 import kotlin.math.sin
 import kotlin.random.Random
@@ -84,20 +77,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     var fireEventCount = mutableStateOf(0)
         private set
 
-    var currentDetectedBounds = mutableStateOf<Rect?>(null)
-        private set
-
-    var lockedBoundsState = mutableStateOf<Rect?>(null)
-        private set
-
-    var targetDistance = mutableStateOf(12)
+    var targetDistance = mutableStateOf(10)
         private set
 
     var speedKmH = mutableStateOf(24)
         private set
-
-    private var framesWithoutTarget = 0
-    private val analysisExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -146,8 +130,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 currentWeapon = weapons[currentWeaponIndex],
                 workflowState = workflowState,
                 fireCount = fireEventCount.value,
-                detectedBounds = currentDetectedBounds.value,
-                lockedBounds = lockedBoundsState.value,
                 distance = targetDistance.value,
                 speed = speedKmH.value,
                 onActionTrigger = { handleActionTrigger() },
@@ -180,18 +162,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     }
 
     /**
-     * Bicycle Handlebar Trigger (Headphone button or screen tap):
-     * 1. SEARCHING: Captures the feature/target currently aligned in the central aiming zone ("Bersaglio tracciato").
-     * 2. LOCKED: Fires missiles at the tracked target ("Bersaglio distrutto!").
+     * Action Trigger (Headphone Play/Pause button or screen tap):
+     * 1st Trigger: Locks the Central Selection Rectangle on the object in view ("Bersaglio tracciato").
+     * 2nd Trigger: Fires missiles, detonating directly inside the Central Selection Rectangle ("Bersaglio distrutto!").
      */
     fun handleActionTrigger() {
         when (workflowState) {
             WorkflowState.SEARCHING -> {
-                // Lock onto current detected bounds in center zone, or capture center aiming box
-                val targetToLock = currentDetectedBounds.value ?: Rect(280f, 550f, 800f, 1370f)
-                lockedBoundsState.value = targetToLock
                 workflowState = WorkflowState.LOCKED
-                framesWithoutTarget = 0
                 playCameraLockSound()
                 speak("Bersaglio tracciato")
             }
@@ -201,7 +179,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 playCinematicExplosionSound()
                 speak("Bersaglio distrutto!")
                 android.os.Handler(mainLooper).postDelayed({
-                    lockedBoundsState.value = null
                     workflowState = WorkflowState.SEARCHING
                 }, 800)
             }
@@ -213,7 +190,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     fun handleDoubleTap() {
         if (workflowState == WorkflowState.LOCKED) {
-            lockedBoundsState.value = null
             workflowState = WorkflowState.SEARCHING
             playBeepSound(600.0, 80)
             speak("Bersaglio sbloccato")
@@ -237,27 +213,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 true
             }
             else -> super.onKeyDown(keyCode, event)
-        }
-    }
-
-    fun updateTargetDetection(bounds: Rect?, distanceMeters: Int) {
-        currentDetectedBounds.value = bounds
-        targetDistance.value = distanceMeters
-
-        // Dynamic target tracking in LOCKED state
-        if (workflowState == WorkflowState.LOCKED) {
-            if (bounds != null) {
-                lockedBoundsState.value = bounds
-                framesWithoutTarget = 0
-            } else {
-                framesWithoutTarget++
-                if (framesWithoutTarget > 25) { // ~0.8s without target
-                    speak("Bersaglio perso")
-                    lockedBoundsState.value = null
-                    workflowState = WorkflowState.SEARCHING
-                    framesWithoutTarget = 0
-                }
-            }
         }
     }
 
@@ -354,7 +309,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             tts.shutdown()
         }
         mediaSession.release()
-        analysisExecutor.shutdown()
     }
 }
 
@@ -363,8 +317,6 @@ fun BadGuyARApp(
     currentWeapon: String,
     workflowState: WorkflowState,
     fireCount: Int,
-    detectedBounds: Rect?,
-    lockedBounds: Rect?,
     distance: Int,
     speed: Int,
     onActionTrigger: () -> Unit,
@@ -372,16 +324,8 @@ fun BadGuyARApp(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val activity = context as? MainActivity
 
     val cameraProviderFuture = remember { ProcessCameraProvider.getInstance(context) }
-    val objectDetector = remember {
-        val options = ObjectDetectorOptions.Builder()
-            .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
-            .enableMultipleObjects()
-            .build()
-        ObjectDetection.getClient(options)
-    }
 
     Box(
         modifier = Modifier
@@ -402,26 +346,13 @@ fun BadGuyARApp(
                     it.setSurfaceProvider(previewView.surfaceProvider)
                 }
 
-                val imageAnalysis = ImageAnalysis.Builder()
-                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-                    .build()
-
-                imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                    processImageProxy(objectDetector, imageProxy) { bounds, dist ->
-                        activity?.runOnUiThread {
-                            activity.updateTargetDetection(bounds, dist)
-                        }
-                    }
-                }
-
                 val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
                 try {
                     cameraProvider.unbindAll()
                     cameraProvider.bindToLifecycle(
                         lifecycleOwner,
                         cameraSelector,
-                        preview,
-                        imageAnalysis
+                        preview
                     )
                 } catch (exc: Exception) {
                     exc.printStackTrace()
@@ -429,12 +360,10 @@ fun BadGuyARApp(
             }, ContextCompat.getMainExecutor(context))
         }
 
-        CameraWorkflowHUD(
+        CentralSelectionHUD(
             currentWeapon = currentWeapon,
             workflowState = workflowState,
             fireCount = fireCount,
-            detectedBounds = detectedBounds,
-            lockedBounds = lockedBounds,
             distance = distance,
             speed = speed,
             onActionTrigger = onActionTrigger,
@@ -443,61 +372,11 @@ fun BadGuyARApp(
     }
 }
 
-@Suppress("DEPRECATION")
-@androidx.annotation.OptIn(androidx.camera.core.ExperimentalGetImage::class)
-private fun processImageProxy(
-    detector: com.google.mlkit.vision.objects.ObjectDetector,
-    imageProxy: ImageProxy,
-    onResult: (Rect?, Int) -> Unit
-) {
-    val mediaImage = imageProxy.image
-    if (mediaImage != null) {
-        val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
-        detector.process(image)
-            .addOnSuccessListener { objects ->
-                val frameCenterX = mediaImage.width / 2f
-                val frameCenterY = mediaImage.height / 2f
-
-                if (objects.isNotEmpty()) {
-                    // Find object closest to central camera aiming zone
-                    val centerObj = objects.minByOrNull { obj ->
-                        val bb = obj.boundingBox
-                        val dx = bb.centerX().toFloat() - frameCenterX
-                        val dy = bb.centerY().toFloat() - frameCenterY
-                        (dx * dx + dy * dy)
-                    }
-
-                    if (centerObj != null) {
-                        val bb = centerObj.boundingBox
-                        val rect = Rect(bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat())
-                        val areaRatio = (bb.width() * bb.height()).toFloat() / (mediaImage.width * mediaImage.height).toFloat()
-                        val estimatedDistance = maxOf(2f, (20f * (1f - areaRatio))).toInt()
-                        onResult(rect, estimatedDistance)
-                    } else {
-                        onResult(null, 12)
-                    }
-                } else {
-                    onResult(null, 12)
-                }
-            }
-            .addOnFailureListener {
-                onResult(null, 12)
-            }
-            .addOnCompleteListener {
-                imageProxy.close()
-            }
-    } else {
-        imageProxy.close()
-    }
-}
-
 @Composable
-fun CameraWorkflowHUD(
+fun CentralSelectionHUD(
     currentWeapon: String,
     workflowState: WorkflowState,
     fireCount: Int,
-    detectedBounds: Rect?,
-    lockedBounds: Rect?,
     distance: Int,
     speed: Int,
     onActionTrigger: () -> Unit,
@@ -509,7 +388,7 @@ fun CameraWorkflowHUD(
     val fireOrange = Color(0xFFFF8800)
     val fireYellow = Color(0xFFFFEE00)
 
-    val infiniteTransition = rememberInfiniteTransition(label = "workflow_hud")
+    val infiniteTransition = rememberInfiniteTransition(label = "central_selection_hud")
     val pulseAlpha by infiniteTransition.animateFloat(
         initialValue = 0.5f,
         targetValue = 1.0f,
@@ -583,96 +462,68 @@ fun CameraWorkflowHUD(
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f - bracketLen, height - 50f), strokeW)
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f, height - 50f - bracketLen), strokeW)
 
-            // --- 2. Central Fixed Aiming Zone (Bicycle Handlebar Aiming) ---
-            val zoneW = 160.dp.toPx()
-            val zoneH = 160.dp.toPx()
-            val zLeft = centerX - zoneW / 2f
-            val zTop = centerY - zoneH / 2f
-            val zRight = centerX + zoneW / 2f
-            val zBottom = centerY + zoneH / 2f
+            // --- 2. Central Selection Rectangle (Exclusively Fixed at Center) ---
+            val rectW = 180.dp.toPx()
+            val rectH = 180.dp.toPx()
+            val tLeft = centerX - rectW / 2f
+            val tTop = centerY - rectH / 2f
+            val tRight = centerX + rectW / 2f
+            val tBottom = centerY + rectH / 2f
+            val cornerLen = 30f
 
             when (workflowState) {
                 WorkflowState.SEARCHING -> {
-                    // Central aiming reticle (where the bicycle points)
-                    val arcColor = ironManGold.copy(alpha = pulseAlpha)
-                    drawCircle(color = hudDimGold, radius = zoneW / 2f, center = Offset(centerX, centerY), style = Stroke(width = 1.5f))
-                    drawCircle(color = arcColor, radius = 6.dp.toPx(), center = Offset(centerX, centerY))
+                    // Central Selection Box in Glowing Gold
+                    val boxColor = ironManGold.copy(alpha = pulseAlpha)
 
-                    // If an object is entering the central zone, draw highlight brackets
-                    if (detectedBounds != null) {
-                        val scaleX = width / 1080f
-                        val scaleY = height / 1920f
-                        val dLeft = detectedBounds.left * scaleX
-                        val dTop = detectedBounds.top * scaleY
-                        val dRight = detectedBounds.right * scaleX
-                        val dBottom = detectedBounds.bottom * scaleY
-                        val cornerSize = 20f
+                    drawLine(boxColor, Offset(tLeft, tTop), Offset(tLeft + cornerLen, tTop), 5f)
+                    drawLine(boxColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerLen), 5f)
 
-                        drawLine(arcColor, Offset(dLeft, dTop), Offset(dLeft + cornerSize, dTop), 4f)
-                        drawLine(arcColor, Offset(dLeft, dTop), Offset(dLeft, dTop + cornerSize), 4f)
-                        drawLine(arcColor, Offset(dRight, dTop), Offset(dRight - cornerSize, dTop), 4f)
-                        drawLine(arcColor, Offset(dRight, dTop), Offset(dRight, dTop + cornerSize), 4f)
-                        drawLine(arcColor, Offset(dLeft, dBottom), Offset(dLeft + cornerSize, dBottom), 4f)
-                        drawLine(arcColor, Offset(dLeft, dBottom), Offset(dLeft, dBottom - cornerSize), 4f)
-                        drawLine(arcColor, Offset(dRight, dBottom), Offset(dRight - cornerSize, dBottom), 4f)
-                        drawLine(arcColor, Offset(dRight, dBottom), Offset(dRight, dBottom - cornerSize), 4f)
-                    }
+                    drawLine(boxColor, Offset(tRight, tTop), Offset(tRight - cornerLen, tTop), 5f)
+                    drawLine(boxColor, Offset(tRight, tTop), Offset(tRight, tTop + cornerLen), 5f)
+
+                    drawLine(boxColor, Offset(tLeft, tBottom), Offset(tLeft + cornerLen, tBottom), 5f)
+                    drawLine(boxColor, Offset(tLeft, tBottom), Offset(tLeft, tBottom - cornerLen), 5f)
+
+                    drawLine(boxColor, Offset(tRight, tBottom), Offset(tRight - cornerLen, tBottom), 5f)
+                    drawLine(boxColor, Offset(tRight, tBottom), Offset(tRight, tBottom - cornerLen), 5f)
+
+                    // Reticle center dot
+                    drawCircle(ironManGold, 4f, Offset(centerX, centerY))
                 }
                 WorkflowState.LOCKED, WorkflowState.FIRING -> {
-                    val bounds = lockedBounds ?: Rect(zLeft, zTop, zRight, zBottom)
-                    val scaleX = width / 1080f
-                    val scaleY = height / 1920f
-                    val tLeft = bounds.left * scaleX
-                    val tTop = bounds.top * scaleY
-                    val tRight = bounds.right * scaleX
-                    val tBottom = bounds.bottom * scaleY
-                    val cornerSize = 25f
-
+                    // Locked Central Selection Box in Bright Red
                     val lockColor = hudRed.copy(alpha = pulseAlpha)
 
-                    // Locked Iron Man tracking brackets following target
-                    drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft + cornerSize, tTop), 6f)
-                    drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerSize), 6f)
+                    drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft + cornerLen, tTop), 7f)
+                    drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerLen), 7f)
 
-                    drawLine(lockColor, Offset(tRight, tTop), Offset(tRight - cornerSize, tTop), 6f)
-                    drawLine(lockColor, Offset(tRight, tTop), Offset(tRight, tTop + cornerSize), 6f)
+                    drawLine(lockColor, Offset(tRight, tTop), Offset(tRight - cornerLen, tTop), 7f)
+                    drawLine(lockColor, Offset(tRight, tTop), Offset(tRight, tTop + cornerLen), 7f)
 
-                    drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft + cornerSize, tBottom), 6f)
-                    drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft, tBottom - cornerSize), 6f)
+                    drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft + cornerLen, tBottom), 7f)
+                    drawLine(lockColor, Offset(tLeft, tBottom), Offset(tLeft, tBottom - cornerLen), 7f)
 
-                    drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight - cornerSize, tBottom), 6f)
-                    drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight, tBottom - cornerSize), 6f)
+                    drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight - cornerLen, tBottom), 7f)
+                    drawLine(lockColor, Offset(tRight, tBottom), Offset(tRight, tBottom - cornerLen), 7f)
 
-                    drawLine(lockColor.copy(alpha = 0.3f), Offset(tLeft, (tTop + tBottom) / 2f), Offset(tRight, (tTop + tBottom) / 2f), 1f)
-                    drawLine(lockColor.copy(alpha = 0.3f), Offset((tLeft + tRight) / 2f, tTop), Offset((tLeft + tRight) / 2f, tBottom), 1f)
+                    // Target crosshairs inside Central Selection Box
+                    drawLine(lockColor.copy(alpha = 0.4f), Offset(tLeft, centerY), Offset(tRight, centerY), 2f)
+                    drawLine(lockColor.copy(alpha = 0.4f), Offset(centerX, tTop), Offset(centerX, tBottom), 2f)
                 }
             }
 
-            // --- 3. Cinematic Explosions AT LOCKED TARGET EPICENTER ---
-            val epicenterX = if (lockedBounds != null) {
-                val scaleX = width / 1080f
-                (lockedBounds.left * scaleX + lockedBounds.right * scaleX) / 2f
-            } else {
-                centerX
-            }
-
-            val epicenterY = if (lockedBounds != null) {
-                val scaleY = height / 1920f
-                (lockedBounds.top * scaleY + lockedBounds.bottom * scaleY) / 2f
-            } else {
-                centerY
-            }
-
+            // --- 3. Cinematic Fire & Spark Explosions DIRECTLY INSIDE CENTRAL SELECTION RECTANGLE ---
             if (showExplosion.value) {
-                drawCircle(color = Color.White, radius = 60f, center = Offset(epicenterX, epicenterY))
-                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(epicenterX, epicenterY), style = Stroke(width = 8f))
-                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.7f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 4f))
+                drawCircle(color = Color.White, radius = 60f, center = Offset(centerX, centerY))
+                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(centerX, centerY), style = Stroke(width = 8f))
+                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.7f, center = Offset(centerX, centerY), style = Stroke(width = 4f))
             }
 
             explosionParticles.value.forEach { p ->
                 val dist = p.speed * 35f
-                val px = epicenterX + (cos(p.angle) * dist).toFloat()
-                val py = epicenterY + (sin(p.angle) * dist).toFloat()
+                val px = centerX + (cos(p.angle) * dist).toFloat()
+                val py = centerY + (sin(p.angle) * dist).toFloat()
                 drawCircle(color = p.color, radius = p.size, center = Offset(px, py))
             }
         }
@@ -684,7 +535,7 @@ fun CameraWorkflowHUD(
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // BICYCLE AR TACTICAL",
+                text = "JARVIS // CENTRAL TARGETING",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -699,9 +550,9 @@ fun CameraWorkflowHUD(
             )
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> "STATO: [INQUADRA BICI E CLICCA CUFFIA]"
+                    WorkflowState.SEARCHING -> "STATO: [INQUADRA AL CENTRO]"
                     WorkflowState.LOCKED -> "STATO: [BERSAGLIO TRACCIATO]"
-                    WorkflowState.FIRING -> "STATO: [IMPATTO MISSILE!]"
+                    WorkflowState.FIRING -> "STATO: [FUOCO!]"
                 },
                 color = if (workflowState == WorkflowState.LOCKED) hudRed else ironManGold,
                 fontSize = 11.sp,
@@ -724,7 +575,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "SISTEMA: HANDS-FREE BICYCLE HUD",
+                text = "AREA SELEZIONE: CENTRO SCHERMO",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -739,9 +590,9 @@ fun CameraWorkflowHUD(
         ) {
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> "PUNTA IL MANUBRIO ED ESEGUI 1° CLICK CUFFIA // TAP PER LOCKARE"
-                    WorkflowState.LOCKED -> "BERSAGLIO TRACCIATO // DISTANZA: ${distance}M"
-                    WorkflowState.FIRING -> "ESPLOSIONE SUL BERSAGLIO IN CORSO..."
+                    WorkflowState.SEARCHING -> "INQUADRA L'OGGETTO O LA PERSONA DENTRO IL RETTANGOLO CENTRALE"
+                    WorkflowState.LOCKED -> "BERSAGLIO CENTRALE TRACCIATO // DISTANZA: ${distance}M"
+                    WorkflowState.FIRING -> "ESPLOSIONE NEL RETTANGOLO CENTRALE IN CORSO..."
                 },
                 color = if (workflowState == WorkflowState.LOCKED) hudRed else ironManGold,
                 fontSize = 14.sp,
@@ -751,8 +602,8 @@ fun CameraWorkflowHUD(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> "[ TASTO PLAY/PAUSE CUFFIE = LOCKA L'AREA CENTRALE ]"
-                    WorkflowState.LOCKED -> "[ TASTO PLAY/PAUSE CUFFIE = FA FUOCO SUL TARGET ]"
+                    WorkflowState.SEARCHING -> "[ 1° CLICK CUFFIA O TAP = LOCKA IL RETTANGOLO CENTRALE ]"
+                    WorkflowState.LOCKED -> "[ 2° CLICK CUFFIA O TAP = SPARO ] | [ DOPPIO TAP = SBLOCCA ]"
                     WorkflowState.FIRING -> "MISSILE IMPATTATO..."
                 },
                 color = hudDimGold,

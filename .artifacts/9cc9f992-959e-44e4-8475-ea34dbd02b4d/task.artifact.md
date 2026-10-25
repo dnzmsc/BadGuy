@@ -1,6 +1,6 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
-- [x] **New**: Implement fixed central aiming zone (ROI) for bicycle handlebar aiming
-- [x] **New**: Implement headphone button / tap feature capture, tracking, and target engagement
+- [x] **New**: Implement dedicated Central Selection Rectangle fixed dead-center on the screen
+- [x] **New**: Implement headphone / tap lock and missile detonation directly inside the Central Selection Rectangle
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
