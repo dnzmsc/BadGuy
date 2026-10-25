@@ -1,0 +1,7 @@
+- [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
+- [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
+- [x] Implement ML Kit shape/object recognition and dynamic tracking in `MainActivity.kt`
+- [x] Implement Italian TTS voice feedback ("Bersaglio acquisito" on recognition)
+- [x] Implement advanced fire & spark particle explosion effects
+- [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
+- [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
