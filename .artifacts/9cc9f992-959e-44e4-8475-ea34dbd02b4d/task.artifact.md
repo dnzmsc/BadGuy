@@ -1,7 +1,6 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
 - [x] Implement 3-step camera tap workflow (`SEARCHING` -> `ACQUIRING` -> `LOCKED` -> `FIRING`)
-- [x] Implement camera focus/lock sounds and Italian TTS "Bersaglio tracciato" on lock
-- [x] Route explosions to detonate at locked target coordinates
+- [x] **New**: Add robust ML Kit options (`enableMultipleObjects`) and smart center-reticle fallback for unclassified shapes/objects
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)

@@ -1,19 +1,14 @@
-# Implementation Plan - BadGuy AR Bicycle Tactical App (3-Step Camera Tap Lock Workflow)
+# Implementation Plan - BadGuy AR Bicycle Tactical App (Robust Shape/Object Recognition & Center Fallback)
 
-Implementing a precise 3-step camera-style tap workflow:
-1. **First tap**: Enters Acquisition mode (scanning sound).
-2. **Second tap**: Locks onto the target in view, plays camera focus beeps, and TTS says "Bersaglio tracciato".
-3. **Third tap**: Fires at the locked target coordinates with cinematic explosion.
+Enhancing shape and object recognition by relaxing ML Kit filtering and adding a smart center-reticle fallback for unclassified objects/obstacles.
 
 ## Proposed Changes
 
 ### [Component Name]
 
 #### [MODIFY] [MainActivity.kt](file:///Users/cammoranesi/AndroidStudioProjects/BadGuy/app/src/main/java/com/example/badguy/MainActivity.kt)
-- Added explicit state machine for tap workflow: `SEARCHING` -> `ACQUIRING` -> `LOCKED` -> `FIRING`.
-- Camera-style focus and lock audio feedback via `AudioTrack`.
-- Voice announcement "Bersaglio tracciato" strictly upon locking.
-- Explosions detonate precisely at the locked target coordinates.
+- **Robust Object Detection**: Enabled multiple objects detection (`enableMultipleObjects()`).
+- **Smart Center-Reticle Fallback**: If ML Kit's base model doesn't return a labeled category, the system automatically uses a dynamic center-reticle bounding box so any object, person, or vehicle placed in the crosshairs can be locked and tracked Iron Man style.
 
 ## Verification Plan
 
@@ -21,4 +16,4 @@ Implementing a precise 3-step camera-style tap workflow:
 - Gradle build (`app:assembleDebug`)
 
 ### Manual Verification
-- Deploy to connected device (`RFGL34STWPJ`) and test the 3-step tap sequence.
+- Deploy to connected device (`RFGL34STWPJ`) and test object/shape locking.

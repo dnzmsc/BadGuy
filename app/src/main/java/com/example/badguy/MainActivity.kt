@@ -183,7 +183,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 playCameraScanSound()
             }
             WorkflowState.ACQUIRING -> {
-                val targetToLock = currentDetectedBounds.value ?: Rect(400f, 700f, 680f, 1220f)
+                val targetToLock = currentDetectedBounds.value ?: Rect(300f, 600f, 780f, 1320f)
                 lockedBoundsState.value = targetToLock
                 workflowState = WorkflowState.LOCKED
                 playCameraLockSound()
@@ -362,6 +362,7 @@ fun BadGuyARApp(
     val objectDetector = remember {
         val options = ObjectDetectorOptions.Builder()
             .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
+            .enableMultipleObjects()
             .enableClassification()
             .build()
         ObjectDetection.getClient(options)
@@ -437,15 +438,8 @@ private fun processImageProxy(
         val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
         detector.process(image)
             .addOnSuccessListener { objects ->
-                val validObjects = objects.filter { obj ->
-                    val bb = obj.boundingBox
-                    val area = (bb.width() * bb.height()).toFloat()
-                    val totalArea = (mediaImage.width * mediaImage.height).toFloat()
-                    area >= (totalArea * 0.03f)
-                }
-
-                if (validObjects.isNotEmpty()) {
-                    val closestObj = validObjects.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
+                if (objects.isNotEmpty()) {
+                    val closestObj = objects.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
                     if (closestObj != null) {
                         val bb = closestObj.boundingBox
                         val rect = Rect(bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat())
@@ -453,14 +447,14 @@ private fun processImageProxy(
                         val estimatedDistance = maxOf(2f, (25f * (1f - areaRatio))).toInt()
                         onResult(rect, estimatedDistance)
                     } else {
-                        onResult(null, 15)
+                        fallbackCenter(mediaImage, onResult)
                     }
                 } else {
-                    onResult(null, 15)
+                    fallbackCenter(mediaImage, onResult)
                 }
             }
             .addOnFailureListener {
-                onResult(null, 15)
+                fallbackCenter(mediaImage, onResult)
             }
             .addOnCompleteListener {
                 imageProxy.close()
@@ -468,6 +462,14 @@ private fun processImageProxy(
     } else {
         imageProxy.close()
     }
+}
+
+private fun fallbackCenter(mediaImage: android.media.Image, onResult: (Rect?, Int) -> Unit) {
+    val w = mediaImage.width.toFloat()
+    val h = mediaImage.height.toFloat()
+    // Center reticle bounding box (Iron Man center locking box)
+    val rect = Rect(w * 0.3f, h * 0.3f, w * 0.7f, h * 0.7f)
+    onResult(rect, 10)
 }
 
 @Composable
