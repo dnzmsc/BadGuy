@@ -96,6 +96,8 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     var speedKmH = mutableStateOf(24)
         private set
 
+    private var lastNotifiedTargetId = -1
+    private var lastFocusBeepTime = 0L
     private val analysisExecutor = Executors.newSingleThreadExecutor()
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -181,7 +183,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     fun handleSingleTap() {
         when (workflowState) {
             WorkflowState.SEARCHING -> {
-                // Lock onto current detected object or center reticle box
                 val targetToLock = currentDetectedBounds.value ?: Rect(300f, 600f, 780f, 1320f)
                 lockedBoundsState.value = targetToLock
                 workflowState = WorkflowState.LOCKED
@@ -233,15 +234,43 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }
     }
 
-    fun updateTargetDetection(bounds: Rect?, distanceMeters: Int) {
+    fun updateTargetDetection(bounds: Rect?, trackingId: Int?, distanceMeters: Int) {
         currentDetectedBounds.value = bounds
         targetDistance.value = distanceMeters
+
+        if (workflowState == WorkflowState.SEARCHING && bounds != null) {
+            val now = System.currentTimeMillis()
+            if (trackingId != null && trackingId != lastNotifiedTargetId) {
+                lastNotifiedTargetId = trackingId
+                lastFocusBeepTime = now
+                playCameraFocusSound()
+            } else if (now - lastFocusBeepTime > 3000) {
+                lastFocusBeepTime = now
+                playCameraFocusSound()
+            }
+        }
 
         if (workflowState == WorkflowState.LOCKED) {
             if (bounds != null) {
                 lockedBoundsState.value = bounds
             }
         }
+    }
+
+    private fun playCameraFocusSound() {
+        Thread {
+            try {
+                val sampleRate = 44100
+                val numSamples = sampleRate / 15
+                val samples = ShortArray(numSamples)
+                for (i in 0 until numSamples) {
+                    samples[i] = (sin(2.0 * Math.PI * 1046.5 * i / sampleRate) * 6000).toInt().toShort()
+                }
+                playAudioSamples(samples)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
     }
 
     private fun playCameraLockSound() {
@@ -390,9 +419,9 @@ fun BadGuyARApp(
                     .build()
 
                 imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                    processImageProxy(objectDetector, imageProxy) { bounds, dist ->
+                    processImageProxy(objectDetector, imageProxy) { bounds, trackingId, dist ->
                         activity?.runOnUiThread {
-                            activity.updateTargetDetection(bounds, dist)
+                            activity.updateTargetDetection(bounds, trackingId, dist)
                         }
                     }
                 }
@@ -431,30 +460,40 @@ fun BadGuyARApp(
 private fun processImageProxy(
     detector: com.google.mlkit.vision.objects.ObjectDetector,
     imageProxy: ImageProxy,
-    onResult: (Rect?, Int) -> Unit
+    onResult: (Rect?, Int?, Int) -> Unit
 ) {
     val mediaImage = imageProxy.image
     if (mediaImage != null) {
         val image = InputImage.fromMediaImage(mediaImage, imageProxy.imageInfo.rotationDegrees)
         detector.process(image)
             .addOnSuccessListener { objects ->
+                val frameCenterX = mediaImage.width / 2f
+                val frameCenterY = mediaImage.height / 2f
+
                 if (objects.isNotEmpty()) {
-                    val largestObj = objects.maxByOrNull { it.boundingBox.width() * it.boundingBox.height() }
-                    if (largestObj != null) {
-                        val bb = largestObj.boundingBox
+                    // Prioritize object closest to the camera center
+                    val centerObj = objects.minByOrNull { obj ->
+                        val bb = obj.boundingBox
+                        val dx = bb.centerX().toFloat() - frameCenterX
+                        val dy = bb.centerY().toFloat() - frameCenterY
+                        (dx * dx + dy * dy)
+                    }
+
+                    if (centerObj != null) {
+                        val bb = centerObj.boundingBox
                         val rect = Rect(bb.left.toFloat(), bb.top.toFloat(), bb.right.toFloat(), bb.bottom.toFloat())
                         val areaRatio = (bb.width() * bb.height()).toFloat() / (mediaImage.width * mediaImage.height).toFloat()
                         val estimatedDistance = maxOf(2f, (20f * (1f - areaRatio))).toInt()
-                        onResult(rect, estimatedDistance)
+                        onResult(rect, centerObj.trackingId, estimatedDistance)
                     } else {
-                        onResult(null, 15)
+                        fallbackCenter(mediaImage, onResult)
                     }
                 } else {
-                    onResult(null, 15)
+                    fallbackCenter(mediaImage, onResult)
                 }
             }
             .addOnFailureListener {
-                onResult(null, 15)
+                fallbackCenter(mediaImage, onResult)
             }
             .addOnCompleteListener {
                 imageProxy.close()
@@ -462,6 +501,13 @@ private fun processImageProxy(
     } else {
         imageProxy.close()
     }
+}
+
+private fun fallbackCenter(mediaImage: android.media.Image, onResult: (Rect?, Int?, Int) -> Unit) {
+    val w = mediaImage.width.toFloat()
+    val h = mediaImage.height.toFloat()
+    val rect = Rect(w * 0.3f, h * 0.3f, w * 0.7f, h * 0.7f)
+    onResult(rect, -1, 10)
 }
 
 @Composable
@@ -659,7 +705,7 @@ fun CameraWorkflowHUD(
             )
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> if (detectedBounds != null) "STATUS: [BERSAGLIO RILEVATO]" else "STATUS: [SCANSIONE IN CORSO...]"
+                    WorkflowState.SEARCHING -> if (detectedBounds != null) "STATUS: [BERSAGLIO CENTRALE RILEVATO]" else "STATUS: [SCANSIONE IN CORSO...]"
                     WorkflowState.LOCKED -> "STATUS: [BERSAGLIO TRACCIATO]"
                     WorkflowState.FIRING -> "STATUS: [FUOCO!]"
                 },
@@ -684,7 +730,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "AI STREAM DETECTOR: ATTIVO",
+                text = "MODALITÀ: CENTER-WEIGHTED AI TARGETING",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -699,7 +745,7 @@ fun CameraWorkflowHUD(
         ) {
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> if (detectedBounds != null) "[ 1° TAP: LOCKA SUL BERSAGLIO RILEVATO ]" else "INQUADRA UN OGGETTO O UNA PERSONA..."
+                    WorkflowState.SEARCHING -> if (detectedBounds != null) "[ 1° TAP: LOCKA SUL BERSAGLIO CENTRALE ]" else "PORTA L'OGGETTO AL CENTRO DELL'INQUADRATURA..."
                     WorkflowState.LOCKED -> "BERSAGLIO TRACCIATO // DISTANZA: ${distance}M"
                     WorkflowState.FIRING -> "IMPATTO MISSILE IN CORSO..."
                 },

@@ -1,15 +1,15 @@
-# Implementation Plan - BadGuy AR Bicycle Tactical App (Intelligent Target Lock & Clean Audio)
+# Implementation Plan - BadGuy AR Bicycle Tactical App (Center-Weighted Priority & Debounced Audio)
 
-Fixing repetitive false-positive beeping and static bounding boxes by using ML Kit stream object detection without repeating audio triggers, combined with smart target locking and gesture controls.
+Implementing center-weighted target selection (prioritizing objects closest to camera screen center) with debounced focus beeps upon target entry.
 
 ## Proposed Changes
 
 ### [Component Name]
 
 #### [MODIFY] [MainActivity.kt](file:///Users/cammoranesi/AndroidStudioProjects/BadGuy/app/src/main/java/com/example/badguy/MainActivity.kt)
-- **Eliminated Repetitive Audio**: Removed automatic repeating audio loops during scanning to keep scanning mode clean and quiet.
-- **ML Kit Stream Object Detection**: Uses ML Kit `STREAM_MODE` with `enableMultipleObjects()` to return live object bounding boxes when present, or `null` when no object is detected.
-- **Smart Target Lock**: Tapping during `SEARCHING` locks onto the detected object (or center reticle if unclassified object), tracks it dynamically in `LOCKED` state ("Bersaglio tracciato"), and second tap fires missiles.
+- **Center-Weighted Target Selection**: Sorts detected objects by distance from their center point to the camera frame center, prioritizing objects directly in front of the bicycle/camera.
+- **Debounced Focus Beep**: Plays a single subtle camera focus beep when a new target enters the central crosshairs (debounced every 3 seconds to avoid sound spam).
+- **Target Lock & Firing**: 1st tap locks onto the center-detected object ("Bersaglio tracciato"), 2nd tap fires missiles at target coordinates.
 
 ## Verification Plan
 
@@ -17,4 +17,4 @@ Fixing repetitive false-positive beeping and static bounding boxes by using ML K
 - Gradle build (`app:assembleDebug`)
 
 ### Manual Verification
-- Deploy to connected device (`RFGL34STWPJ`) and verify quiet scanning, tap-to-lock, tracking, and tap-to-fire.
+- Deploy to connected device (`RFGL34STWPJ`) and test center-weighted object detection, focus beep on target entry, tap-to-lock, and tap-to-fire.

@@ -1,6 +1,7 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
-- [x] **New**: Remove repetitive audio loops and implement clean ML Kit stream object detection
-- [x] Implement smart tap-to-lock, dynamic tracking, and tap-to-fire workflow
+- [x] **New**: Implement center-weighted object selection (prioritizing objects near screen center)
+- [x] **New**: Implement debounced camera focus beep when a new target enters the central crosshairs
+- [x] Implement tap-to-lock, dynamic tracking, and tap-to-fire workflow
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
