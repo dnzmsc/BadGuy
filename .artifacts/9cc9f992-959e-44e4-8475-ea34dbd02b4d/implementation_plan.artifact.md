@@ -1,16 +1,20 @@
-# Implementation Plan - BadGuy AR Bicycle Tactical App (Live Dynamic Target Tracking & Visual Highlight)
+# Implementation Plan - BadGuy AR Bicycle Tactical App (Space Movie Reticle Lock & Accurate Coordinate Mapping)
 
-Integrating real-time object detection and dynamic frame-by-frame target tracking so the locked red HUD brackets follow the acquired object across the screen as the camera/phone moves.
+Implementing exact space-movie style central reticle locking and dynamic object tracking with accurate screen coordinate matrix scaling:
+1. **Fixed Central Reticle**: Turns RED and beeps when an object enters the central aiming square.
+2. **1st Click/Tap (Lock & Detach)**: Locks onto the object inside the central square. The red reticle detaches from screen center and sticks onto the object, tracking its position across the screen as the phone moves.
+3. **Target Loss**: Announces "Bersaglio perso" if the tracked object leaves the camera view.
+4. **2nd Click/Tap (Fire)**: Fires missiles at the tracked reticle's live coordinates with cinematic explosion.
 
 ## Proposed Changes
 
 ### [Component Name]
 
 #### [MODIFY] [MainActivity.kt](file:///Users/cammoranesi/AndroidStudioProjects/BadGuy/app/src/main/java/com/example/badguy/MainActivity.kt)
-- **Live Image Analysis**: Restored CameraX `ImageAnalysis` with ML Kit stream object detector.
-- **Clear Visual Scanning Highlight**: Displays prominent pulsing gold HUD brackets around detected objects in the central region during `SEARCHING`.
-- **Dynamic Frame-by-Frame Tracking**: In `LOCKED` state, updates `lockedBoundsState` continuously to follow the object's motion across the screen as the phone moves.
-- **Target Loss Detection**: Announces "Bersaglio perso" if the locked object leaves the camera view.
+- **Accurate Screen Matrix Scaling**: Bounding box coordinates converted normalized to screen dimensions (`screenWidth`, `screenHeight`), eliminating offset errors.
+- **Central Reticle Red Shift & Beep**: Central reticle turns RED and beeps when an object enters the central square.
+- **Space Movie Object Tracking**: 1st click/tap locks target; red reticle detaches from center and tracks object position across the screen.
+- **Target Engagement**: 2nd click/tap detonates explosions on live reticle location.
 
 ## Verification Plan
 
@@ -18,4 +22,4 @@ Integrating real-time object detection and dynamic frame-by-frame target trackin
 - Gradle build (`app:assembleDebug`)
 
 ### Manual Verification
-- Deploy to connected device (`RFGL34STWPJ`) and test visual scanning highlight, locking onto an object, moving the camera to verify tracking across the screen, and firing.
+- Deploy to connected device (`RFGL34STWPJ`) and test centering an object in reticle (turns red + beeps), tapping to lock/track across screen as phone moves, and tapping to fire.

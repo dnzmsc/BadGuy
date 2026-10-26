@@ -1,8 +1,8 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
-- [x] **New**: Restore live CameraX `ImageAnalysis` with ML Kit stream object detector
-- [x] **New**: Display prominent visual pulsing gold brackets for detected objects during `SEARCHING`
-- [x] **New**: Implement live dynamic target tracking in `LOCKED` state that follows objects across the screen as the phone moves
-- [x] **New**: Implement automatic target loss detection ("Bersaglio perso")
+- [x] **New**: Fix coordinate scaling matrix mapping normalized camera coords directly to screen dimensions
+- [x] **New**: Implement Central Aiming Reticle that turns RED and plays focus beep when object enters center square
+- [x] **New**: Implement Space Movie Reticle Lock where red reticle detaches from center and tracks object across screen
+- [x] **New**: Implement 2nd click/tap missile engagement on tracked reticle position
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
