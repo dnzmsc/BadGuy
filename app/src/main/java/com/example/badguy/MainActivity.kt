@@ -221,7 +221,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     speak("Bersaglio distrutto!")
                     lockedBoundsState.value = null
                     workflowState = WorkflowState.SEARCHING
-                }, 2200)
+                }, 1300) // Adjusted 1.3s for single GIF playback
             }
             WorkflowState.FIRING -> {
                 // Already firing
@@ -635,20 +635,28 @@ fun CameraWorkflowHUD(
     var targetCenterXPx by remember { mutableFloatStateOf(0f) }
     var targetCenterYPx by remember { mutableFloatStateOf(0f) }
 
+    // Frozen impact position to prevent explosion GIF from shifting while playing
+    var impactXPx by remember { mutableFloatStateOf(0f) }
+    var impactYPx by remember { mutableFloatStateOf(0f) }
+
     LaunchedEffect(fireCount) {
         if (fireCount > 0) {
             missileProgress.snapTo(0f)
             
+            // Freeze target epicenter coordinates at exact moment of firing!
+            impactXPx = targetCenterXPx
+            impactYPx = targetCenterYPx
+
             // Launch Homing Missiles from bottom corners
             missileProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(durationMillis = 400, easing = FastOutLinearInEasing)
             )
 
-            // Missile Impact at 100% -> Show User's New Explosion GIF Asset for 2.2s
+            // Missile Impact at 100% -> Show User's GIF Explosion for 1.3s (one-shot playback)
             showExplosion.value = true
             scope.launch {
-                delay(2200)
+                delay(1300)
                 showExplosion.value = false
             }
         }
@@ -766,19 +774,19 @@ fun CameraWorkflowHUD(
             if (p > 0f && p < 1f) {
                 val m1StartX = 0f
                 val m1StartY = height
-                val m1ControlX = currentEpicenterX * 0.3f
+                val m1ControlX = impactXPx * 0.3f
                 val m1ControlY = height * 0.5f
 
-                val m1X = (1 - p) * (1 - p) * m1StartX + 2 * (1 - p) * p * m1ControlX + p * p * currentEpicenterX
-                val m1Y = (1 - p) * (1 - p) * m1StartY + 2 * (1 - p) * p * m1ControlY + p * p * currentEpicenterY
+                val m1X = (1 - p) * (1 - p) * m1StartX + 2 * (1 - p) * p * m1ControlX + p * p * impactXPx
+                val m1Y = (1 - p) * (1 - p) * m1StartY + 2 * (1 - p) * p * m1ControlY + p * p * impactYPx
 
                 val m2StartX = width
                 val m2StartY = height
-                val m2ControlX = width - (width - currentEpicenterX) * 0.3f
+                val m2ControlX = width - (width - impactXPx) * 0.3f
                 val m2ControlY = height * 0.5f
 
-                val m2X = (1 - p) * (1 - p) * m2StartX + 2 * (1 - p) * p * m2ControlX + p * p * currentEpicenterX
-                val m2Y = (1 - p) * (1 - p) * m2StartY + 2 * (1 - p) * p * m2ControlY + p * p * currentEpicenterY
+                val m2X = (1 - p) * (1 - p) * m2StartX + 2 * (1 - p) * p * m2ControlX + p * p * impactXPx
+                val m2Y = (1 - p) * (1 - p) * m2StartY + 2 * (1 - p) * p * m2ControlY + p * p * impactYPx
 
                 // Rocket exhaust plumes
                 val m1Brush = Brush.linearGradient(
@@ -804,13 +812,13 @@ fun CameraWorkflowHUD(
             }
         }
 
-        // --- 4. RENDER THE USER'S NEW REAL ANIMATED EXPLOSION GIF (R.drawable.explosion) AT IMPACT ---
+        // --- 4. RENDER THE USER'S REAL ANIMATED EXPLOSION GIF FIXED AT IMPACT POSITION ---
         if (showExplosion.value) {
             val gifSizeDp = 340.dp
             val halfSizePx = with(density) { gifSizeDp.toPx() / 2f }
 
-            val offsetXDp = with(density) { (targetCenterXPx - halfSizePx).toDp() }
-            val offsetYDp = with(density) { (targetCenterYPx - halfSizePx).toDp() }
+            val offsetXDp = with(density) { (impactXPx - halfSizePx).toDp() }
+            val offsetYDp = with(density) { (impactYPx - halfSizePx).toDp() }
 
             Box(
                 modifier = Modifier
@@ -836,7 +844,7 @@ fun CameraWorkflowHUD(
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // USER GIF EXPLOSION ENGINE",
+                text = "JARVIS // FROZEN IMPACT GIF ENGINE",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -876,7 +884,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "NEW USER GIF ASSET: LOADED",
+                text = "ONE-SHOT GIF PLAYBACK: OK",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -905,7 +913,7 @@ fun CameraWorkflowHUD(
                 text = when (workflowState) {
                     WorkflowState.SEARCHING -> "[ MIRINO ROSSO = BERSAGLIO NELL'AREA ]"
                     WorkflowState.LOCKED -> "[ 1° CLICK CUFFIA = LANCIA MISSILI ] | [ DOPPIO TAP = SBLOCCA ]"
-                    WorkflowState.FIRING -> "ESPLOSIONE NUOVA GIF REALE IN CORSO..."
+                    WorkflowState.FIRING -> "ESPLOSIONE SUL PUNTO FISSO D'IMPATTO..."
                 },
                 color = hudDimGold,
                 fontSize = 10.sp,
