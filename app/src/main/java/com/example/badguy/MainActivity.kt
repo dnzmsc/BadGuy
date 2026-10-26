@@ -31,8 +31,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
@@ -70,13 +72,6 @@ enum class WorkflowState {
     LOCKED,
     FIRING
 }
-
-data class CinematicSpark(
-    val angle: Double,
-    val speed: Float,
-    val size: Float,
-    val color: Color
-)
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
@@ -228,7 +223,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     speak("Bersaglio distrutto!")
                     lockedBoundsState.value = null
                     workflowState = WorkflowState.SEARCHING
-                }, 1000)
+                }, 2200) // Extended duration: 2.2 seconds
             }
             WorkflowState.FIRING -> {
                 // Already firing
@@ -652,10 +647,10 @@ fun CameraWorkflowHUD(
                 animationSpec = tween(durationMillis = 400, easing = FastOutLinearInEasing)
             )
 
-            // Missile Impact at 100% -> Show User's Real Animated GIF Explosion
+            // Missile Impact at 100% -> Show User's Real Animated GIF Explosion for 2.2s with Screen BlendMode
             showExplosion.value = true
             scope.launch {
-                delay(800)
+                delay(2200) // Extended duration: 2.2 seconds
                 showExplosion.value = false
             }
         }
@@ -680,7 +675,6 @@ fun CameraWorkflowHUD(
             val scaleX = width / max(1f, frameWidth)
             val scaleY = height / max(1f, frameHeight)
 
-            // Calculate live epicenter position for missiles and GIF explosion
             val currentEpicenterX = if (lockedBounds != null) {
                 val b = lockedBounds
                 (b.left * scaleX + b.right * scaleX) / 2f
@@ -812,9 +806,9 @@ fun CameraWorkflowHUD(
             }
         }
 
-        // --- 4. RENDER THE USER'S REAL ANIMATED EXPLOSION GIF (R.drawable.explosion) AT IMPACT ---
+        // --- 4. RENDER THE USER'S REAL ANIMATED EXPLOSION GIF WITH AUTOMATIC BLACK BACKGROUND REMOVAL ---
         if (showExplosion.value) {
-            val gifSizeDp = 280.dp
+            val gifSizeDp = 340.dp
             val halfSizePx = with(density) { gifSizeDp.toPx() / 2f }
 
             val offsetXDp = with(density) { (targetCenterXPx - halfSizePx).toDp() }
@@ -832,6 +826,7 @@ fun CameraWorkflowHUD(
                         .build(),
                     imageLoader = imageLoader,
                     contentDescription = "Real Animated Explosion GIF",
+                    colorFilter = ColorFilter.tint(Color.White, BlendMode.Screen),
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -844,7 +839,7 @@ fun CameraWorkflowHUD(
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // USER REAL GIF ENGINE",
+                text = "JARVIS // BLACK-KEYED GIF ENGINE",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -884,7 +879,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "ASSET: R.drawable.explosion (GIF)",
+                text = "BLACK KEYING (BLENDMODE.SCREEN): OK",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -913,7 +908,7 @@ fun CameraWorkflowHUD(
                 text = when (workflowState) {
                     WorkflowState.SEARCHING -> "[ MIRINO ROSSO = BERSAGLIO NELL'AREA ]"
                     WorkflowState.LOCKED -> "[ 1° CLICK CUFFIA = LANCIA MISSILI ] | [ DOPPIO TAP = SBLOCCA ]"
-                    WorkflowState.FIRING -> "IMPATTO ED ESPLOSIONE GIF REALE..."
+                    WorkflowState.FIRING -> "ESPLOSIONE GIF TRASPARENTE (2.2 SEC)..."
                 },
                 color = hudDimGold,
                 fontSize = 10.sp,

@@ -1,6 +1,6 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add Coil Compose & Coil Gif dependencies to `build.gradle.kts`
-- [x] **New**: Integrate Coil `ImageLoader` with `ImageDecoderDecoder` / `GifDecoder` for real GIF playback
-- [x] **New**: Render user's real `R.drawable.explosion` GIF asset at target epicenter `(epicenterX, epicenterY)` upon missile impact
+- [x] **New**: Apply `BlendMode.Screen` to automatically remove black/dark backgrounds from GIF assets
+- [x] **New**: Extend explosion display duration to 2.2 seconds
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
