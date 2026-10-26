@@ -62,6 +62,7 @@ import java.util.concurrent.Executors
 import kotlin.math.abs
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.sin
 import kotlin.random.Random
 
@@ -94,7 +95,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     var currentDetectedBounds = mutableStateOf<Rect?>(null)
         private set
 
+    var currentContourPoints = mutableStateOf<List<Offset>>(emptyList())
+        private set
+
     var lockedBoundsState = mutableStateOf<Rect?>(null)
+        private set
+
+    var lockedContourState = mutableStateOf<List<Offset>>(emptyList())
         private set
 
     var targetDistance = mutableStateOf(12)
@@ -162,6 +169,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 isObjectInCenter = isObjectInCenter,
                 fireCount = fireEventCount.value,
                 detectedBounds = currentDetectedBounds.value,
+                contourPoints = if (workflowState == WorkflowState.LOCKED) lockedContourState.value else currentContourPoints.value,
                 lockedBounds = lockedBoundsState.value,
                 distance = targetDistance.value,
                 speed = speedKmH.value,
@@ -206,6 +214,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     cameraFrameHeight * 0.65f
                 )
                 lockedBoundsState.value = targetToLock
+                lockedContourState.value = currentContourPoints.value
                 workflowState = WorkflowState.LOCKED
                 framesWithoutTarget = 0
                 playCameraLockSound()
@@ -220,8 +229,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     playCinematicExplosionSound()
                     speak("Bersaglio distrutto!")
                     lockedBoundsState.value = null
+                    lockedContourState.value = emptyList()
                     workflowState = WorkflowState.SEARCHING
-                }, 1300) // Adjusted 1.3s for single GIF playback
+                }, 1300)
             }
             WorkflowState.FIRING -> {
                 // Already firing
@@ -232,6 +242,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     fun handleDoubleTap() {
         if (workflowState == WorkflowState.LOCKED) {
             lockedBoundsState.value = null
+            lockedContourState.value = emptyList()
             workflowState = WorkflowState.SEARCHING
             playBeepSound(600.0, 80)
             speak("Bersaglio sbloccato")
@@ -260,12 +271,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
     fun updateTargetDetection(
         bounds: Rect?,
+        contours: List<Offset>,
         inCenter: Boolean,
         distanceMeters: Int,
         imgWidth: Float,
         imgHeight: Float
     ) {
         currentDetectedBounds.value = bounds
+        currentContourPoints.value = contours
         isObjectInCenter = inCenter
         targetDistance.value = distanceMeters
         cameraFrameWidth = imgWidth
@@ -282,12 +295,14 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         if (workflowState == WorkflowState.LOCKED) {
             if (bounds != null) {
                 lockedBoundsState.value = bounds
+                lockedContourState.value = contours
                 framesWithoutTarget = 0
             } else {
                 framesWithoutTarget++
                 if (framesWithoutTarget > 25) {
                     speak("Bersaglio perso")
                     lockedBoundsState.value = null
+                    lockedContourState.value = emptyList()
                     workflowState = WorkflowState.SEARCHING
                     framesWithoutTarget = 0
                 }
@@ -437,6 +452,7 @@ fun BadGuyARApp(
     isObjectInCenter: Boolean,
     fireCount: Int,
     detectedBounds: Rect?,
+    contourPoints: List<Offset>,
     lockedBounds: Rect?,
     distance: Int,
     speed: Int,
@@ -482,9 +498,9 @@ fun BadGuyARApp(
                     .build()
 
                 imageAnalysis.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
-                    processImageProxy(objectDetector, imageProxy) { bounds, inCenter, dist, w, h ->
+                    processImageProxy(objectDetector, imageProxy) { bounds, contours, inCenter, dist, w, h ->
                         activity?.runOnUiThread {
-                            activity.updateTargetDetection(bounds, inCenter, dist, w, h)
+                            activity.updateTargetDetection(bounds, contours, inCenter, dist, w, h)
                         }
                     }
                 }
@@ -510,6 +526,7 @@ fun BadGuyARApp(
             isObjectInCenter = isObjectInCenter,
             fireCount = fireCount,
             detectedBounds = detectedBounds,
+            contourPoints = contourPoints,
             lockedBounds = lockedBounds,
             distance = distance,
             speed = speed,
@@ -526,7 +543,7 @@ fun BadGuyARApp(
 private fun processImageProxy(
     detector: com.google.mlkit.vision.objects.ObjectDetector,
     imageProxy: ImageProxy,
-    onResult: (Rect?, Boolean, Int, Float, Float) -> Unit
+    onResult: (Rect?, List<Offset>, Boolean, Int, Float, Float) -> Unit
 ) {
     val mediaImage = imageProxy.image
     if (mediaImage != null) {
@@ -559,18 +576,21 @@ private fun processImageProxy(
                         val inCenter = abs(objCenterX - frameCenterX) <= centerZoneRadius &&
                                 abs(objCenterY - frameCenterY) <= centerZoneRadius
 
+                        // Extract Sobel edge contour points inside object ROI
+                        val contours = extractObjectContours(mediaImage, bb)
+
                         val areaRatio = (bb.width() * bb.height()).toFloat() / (imgW * imgH)
                         val estimatedDistance = maxOf(2f, (20f * (1f - areaRatio))).toInt()
-                        onResult(rect, inCenter, estimatedDistance, imgW, imgH)
+                        onResult(rect, contours, inCenter, estimatedDistance, imgW, imgH)
                     } else {
-                        onResult(null, false, 12, imgW, imgH)
+                        onResult(null, emptyList(), false, 12, imgW, imgH)
                     }
                 } else {
-                    onResult(null, false, 12, imgW, imgH)
+                    onResult(null, emptyList(), false, 12, imgW, imgH)
                 }
             }
             .addOnFailureListener {
-                onResult(null, false, 12, imgW, imgH)
+                onResult(null, emptyList(), false, 12, imgW, imgH)
             }
             .addOnCompleteListener {
                 imageProxy.close()
@@ -580,6 +600,48 @@ private fun processImageProxy(
     }
 }
 
+/**
+ * Sobel Edge Gradient Contour Extractor.
+ * Extracts high-contrast physical outline points of the object inside its ROI.
+ */
+private fun extractObjectContours(mediaImage: android.media.Image, bb: android.graphics.Rect): List<Offset> {
+    val points = mutableListOf<Offset>()
+    try {
+        val plane = mediaImage.planes[0]
+        val buffer = plane.buffer
+        val rowStride = plane.rowStride
+        val width = mediaImage.width
+        val height = mediaImage.height
+
+        val rLeft = max(1, bb.left)
+        val rRight = min(width - 2, bb.right)
+        val rTop = max(1, bb.top)
+        val rBottom = min(height - 2, bb.bottom)
+
+        val stepX = max(2, (rRight - rLeft) / 16)
+        val stepY = max(2, (rBottom - rTop) / 16)
+
+        for (y in rTop until rBottom step stepY) {
+            for (x in rLeft until rRight step stepX) {
+                val idx = y * rowStride + x
+                if (idx + rowStride + 1 < buffer.capacity()) {
+                    val p00 = buffer.get(idx).toInt() and 0xFF
+                    val p01 = buffer.get(idx + 1).toInt() and 0xFF
+                    val p10 = buffer.get(idx + rowStride).toInt() and 0xFF
+                    val gx = abs(p01 - p00)
+                    val gy = abs(p10 - p00)
+                    if (gx + gy > 28) {
+                        points.add(Offset(x.toFloat(), y.toFloat()))
+                    }
+                }
+            }
+        }
+    } catch (e: Exception) {
+        e.printStackTrace()
+    }
+    return points
+}
+
 @Composable
 fun CameraWorkflowHUD(
     currentWeapon: String,
@@ -587,6 +649,7 @@ fun CameraWorkflowHUD(
     isObjectInCenter: Boolean,
     fireCount: Int,
     detectedBounds: Rect?,
+    contourPoints: List<Offset>,
     lockedBounds: Rect?,
     distance: Int,
     speed: Int,
@@ -615,7 +678,6 @@ fun CameraWorkflowHUD(
         label = "pulseAlpha"
     )
 
-    // Coil ImageLoader configured for animated GIF playback
     val imageLoader = remember(context) {
         ImageLoader.Builder(context)
             .components {
@@ -635,7 +697,6 @@ fun CameraWorkflowHUD(
     var targetCenterXPx by remember { mutableFloatStateOf(0f) }
     var targetCenterYPx by remember { mutableFloatStateOf(0f) }
 
-    // Frozen impact position to prevent explosion GIF from shifting while playing
     var impactXPx by remember { mutableFloatStateOf(0f) }
     var impactYPx by remember { mutableFloatStateOf(0f) }
 
@@ -643,17 +704,14 @@ fun CameraWorkflowHUD(
         if (fireCount > 0) {
             missileProgress.snapTo(0f)
             
-            // Freeze target epicenter coordinates at exact moment of firing!
             impactXPx = targetCenterXPx
             impactYPx = targetCenterYPx
 
-            // Launch Homing Missiles from bottom corners
             missileProgress.animateTo(
                 targetValue = 1f,
                 animationSpec = tween(durationMillis = 400, easing = FastOutLinearInEasing)
             )
 
-            // Missile Impact at 100% -> Show User's GIF Explosion for 1.3s (one-shot playback)
             showExplosion.value = true
             scope.launch {
                 delay(1300)
@@ -713,7 +771,16 @@ fun CameraWorkflowHUD(
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f - bracketLen, height - 50f), strokeW)
             drawLine(hudDimGold, Offset(width - 50f, height - 50f), Offset(width - 50f, height - 50f - bracketLen), strokeW)
 
-            // --- 2. Central Reticle & Space-Movie Object Tracking ---
+            // --- 2. SILHOUETTE CONTOUR OUTLINE & OBJECT TRACKING ---
+            val outlineColor = if (workflowState == WorkflowState.LOCKED) hudRed.copy(alpha = pulseAlpha) else ironManGold.copy(alpha = pulseAlpha)
+
+            // Draw glowing neon contour points tracing the physical shape of the object
+            contourPoints.forEach { pt ->
+                val px = pt.x * scaleX
+                val py = pt.y * scaleY
+                drawCircle(color = outlineColor, radius = 3.5f, center = Offset(px, py))
+            }
+
             when (workflowState) {
                 WorkflowState.SEARCHING -> {
                     val reticleW = 160.dp.toPx()
@@ -751,7 +818,6 @@ fun CameraWorkflowHUD(
 
                     val lockColor = hudRed.copy(alpha = pulseAlpha)
 
-                    // Tracked Red Reticle Brackets following object dynamically
                     drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft + cornerSize, tTop), 6f)
                     drawLine(lockColor, Offset(tLeft, tTop), Offset(tLeft, tTop + cornerSize), 6f)
 
@@ -788,7 +854,6 @@ fun CameraWorkflowHUD(
                 val m2X = (1 - p) * (1 - p) * m2StartX + 2 * (1 - p) * p * m2ControlX + p * p * impactXPx
                 val m2Y = (1 - p) * (1 - p) * m2StartY + 2 * (1 - p) * p * m2ControlY + p * p * impactYPx
 
-                // Rocket exhaust plumes
                 val m1Brush = Brush.linearGradient(
                     colors = listOf(Color.White, fireYellow, fireOrange, Color(0x66333333)),
                     start = Offset(m1X, m1Y),
@@ -803,7 +868,6 @@ fun CameraWorkflowHUD(
                 drawLine(brush = m1Brush, start = Offset(m1StartX, m1StartY), end = Offset(m1X, m1Y), strokeWidth = 14f)
                 drawLine(brush = m2Brush, start = Offset(m2StartX, m2StartY), end = Offset(m2X, m2Y), strokeWidth = 14f)
 
-                // Metallic rocket warheads
                 drawCircle(color = Color.White, radius = 12f, center = Offset(m1X, m1Y))
                 drawCircle(color = hudRed, radius = 20f, center = Offset(m1X, m1Y), style = Stroke(width = 4f))
 
@@ -844,7 +908,7 @@ fun CameraWorkflowHUD(
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // FROZEN IMPACT GIF ENGINE",
+                text = "JARVIS // SILHOUETTE CONTOUR ENGINE",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -859,8 +923,8 @@ fun CameraWorkflowHUD(
             )
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> if (isObjectInCenter) "STATO: [BERSAGLIO AL CENTRO!]" else "STATO: [SCANSIONE CENTRALE...]"
-                    WorkflowState.LOCKED -> "STATO: [BERSAGLIO TRACCIATO IN MOVIMENTO]"
+                    WorkflowState.SEARCHING -> if (isObjectInCenter) "STATO: [FORMA RILEVATA!]" else "STATO: [SCANSIONE CONTORNI...]"
+                    WorkflowState.LOCKED -> "STATO: [FORMA TRACCIATA IN MOVIMENTO]"
                     WorkflowState.FIRING -> "STATO: [LANCIO MISSILI IN CORSO!]"
                 },
                 color = if (workflowState == WorkflowState.LOCKED || isObjectInCenter) hudRed else ironManGold,
@@ -884,7 +948,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "ONE-SHOT GIF PLAYBACK: OK",
+                text = "SOBEL SHAPE CONTOUR: ACTIVE",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -899,8 +963,8 @@ fun CameraWorkflowHUD(
         ) {
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> if (isObjectInCenter) "[ 1° CLICK CUFFIA: LOCKA BERSAGLIO ]" else "PORTA L'OGGETTO NEL MIRINO CENTRALE..."
-                    WorkflowState.LOCKED -> "BERSAGLIO TRACCIATO IN MOVIMENTO // DISTANZA: ${distance}M"
+                    WorkflowState.SEARCHING -> if (isObjectInCenter) "[ 1° CLICK CUFFIA: LOCKA LA FORMA ]" else "INQUADRA LA FORMA DI UN OGGETTO..."
+                    WorkflowState.LOCKED -> "FORMA TRACCIATA IN MOVIMENTO // DISTANZA: ${distance}M"
                     WorkflowState.FIRING -> "MISSILI IN VOLO DAI MANUBRI..."
                 },
                 color = if (workflowState == WorkflowState.LOCKED || isObjectInCenter) hudRed else ironManGold,
@@ -911,9 +975,9 @@ fun CameraWorkflowHUD(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> "[ MIRINO ROSSO = BERSAGLIO NELL'AREA ]"
+                    WorkflowState.SEARCHING -> "[ PUNTINI NEON = BORDO DELLA FORMA ]"
                     WorkflowState.LOCKED -> "[ 1° CLICK CUFFIA = LANCIA MISSILI ] | [ DOPPIO TAP = SBLOCCA ]"
-                    WorkflowState.FIRING -> "ESPLOSIONE SUL PUNTO FISSO D'IMPATTO..."
+                    WorkflowState.FIRING -> "ESPLOSIONE SUL BERSAGLIO..."
                 },
                 color = hudDimGold,
                 fontSize = 10.sp,

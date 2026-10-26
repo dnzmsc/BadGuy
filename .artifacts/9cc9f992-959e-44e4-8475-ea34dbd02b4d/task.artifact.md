@@ -1,6 +1,6 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
-- [x] Add Coil Compose & Coil Gif dependencies to `build.gradle.kts`
-- [x] **New**: Freeze explosion GIF coordinates `(impactX, impactY)` at moment of impact to prevent shifting
-- [x] **New**: Adjust GIF display duration to 1300ms for one-shot playback without looping
+- [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
+- [x] **New**: Implement Sobel edge gradient analysis in CameraX `ImageAnalysis` to extract shape contour points
+- [x] **New**: Render glowing neon silhouette path overlay around the physical outline of objects/persons
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)
