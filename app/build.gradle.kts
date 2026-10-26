@@ -58,6 +58,10 @@ dependencies {
     // ML Kit Object Detection
     implementation("com.google.mlkit:object-detection:17.0.2")
 
+    // Coil for loading real animated GIF assets (R.drawable.explosion)
+    implementation("io.coil-kt:coil-compose:2.7.0")
+    implementation("io.coil-kt:coil-gif:2.7.0")
+
     testImplementation(libs.junit)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)

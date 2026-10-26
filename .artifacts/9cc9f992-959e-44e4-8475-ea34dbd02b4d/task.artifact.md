@@ -1,7 +1,6 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
-- [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
-- [x] **New**: Implement 16-frame ARGB_8888 Bitmap Explosion Sprite Engine with radial fire shaders and charcoal smoke
-- [x] **New**: Implement native Canvas bitmap frame rendering (`drawBitmap`) at target coordinates
-- [x] **New**: Render metallic missile warhead sprites with trailing rocket exhaust plumes
+- [x] Add Coil Compose & Coil Gif dependencies to `build.gradle.kts`
+- [x] **New**: Integrate Coil `ImageLoader` with `ImageDecoderDecoder` / `GifDecoder` for real GIF playback
+- [x] **New**: Render user's real `R.drawable.explosion` GIF asset at target epicenter `(epicenterX, epicenterY)` upon missile impact
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)

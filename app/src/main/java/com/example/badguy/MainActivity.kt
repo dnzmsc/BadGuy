@@ -2,11 +2,12 @@ package com.example.badguy
 
 import android.Manifest
 import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.session.MediaSession
+import android.os.Build.VERSION
+import android.os.Build.VERSION_CODES
 import android.os.Bundle
 import android.speech.tts.TextToSpeech
 import android.view.KeyEvent
@@ -33,10 +34,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
-import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -47,9 +47,16 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import coil.ImageLoader
+import coil.compose.AsyncImage
+import coil.decode.GifDecoder
+import coil.decode.ImageDecoderDecoder
+import coil.request.ImageRequest
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.objects.ObjectDetection
 import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -64,73 +71,12 @@ enum class WorkflowState {
     FIRING
 }
 
-/**
- * 16-Frame Bitmap Explosion Sprite Engine
- * Pre-renders 16 high-resolution bitmap textures with volumetric fireball radial gradients,
- * dark billowing charcoal smoke, white-hot fire core, and flying sparks.
- */
-class ExplosionSpriteGenerator(size: Int = 360) {
-    val frames = mutableListOf<Bitmap>()
-
-    init {
-        val numFrames = 16
-        for (i in 0 until numFrames) {
-            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-            val canvas = android.graphics.Canvas(bitmap)
-            val progress = i.toFloat() / numFrames.toFloat()
-            val center = size / 2f
-            val radius = (size / 2f - 20f) * progress
-
-            if (progress < 0.85f) {
-                // Layer 1: Dark Billowing Charcoal Smoke
-                val smokePaint = android.graphics.Paint().apply {
-                    isAntiAlias = true
-                    color = android.graphics.Color.argb((180 * (1f - progress)).toInt(), 35, 25, 25)
-                }
-                canvas.drawCircle(center, center, maxOf(1f, radius * 1.25f), smokePaint)
-
-                // Layer 2: Volumetric Fireball Gradient (White -> Yellow -> Orange -> Crimson -> Transparent)
-                val firePaint = android.graphics.Paint().apply {
-                    isAntiAlias = true
-                    shader = android.graphics.RadialGradient(
-                        center, center, maxOf(1f, radius),
-                        intArrayOf(
-                            android.graphics.Color.WHITE,
-                            android.graphics.Color.rgb(255, 230, 0),
-                            android.graphics.Color.rgb(255, 80, 0),
-                            android.graphics.Color.rgb(200, 0, 0),
-                            android.graphics.Color.TRANSPARENT
-                        ),
-                        floatArrayOf(0f, 0.25f, 0.55f, 0.85f, 1f),
-                        android.graphics.Shader.TileMode.CLAMP
-                    )
-                }
-                canvas.drawCircle(center, center, maxOf(1f, radius), firePaint)
-
-                // Layer 3: Flying Sparks and Debris
-                val sparkPaint = android.graphics.Paint().apply {
-                    isAntiAlias = true
-                    color = android.graphics.Color.rgb(255, 240, 150)
-                }
-                val random = java.util.Random(i.toLong() * 100)
-                repeat(25) {
-                    val angle = random.nextDouble() * 2 * Math.PI
-                    val sparkDist = radius * (0.8f + random.nextFloat() * 0.5f)
-                    val sx = center + cos(angle).toFloat() * sparkDist
-                    val sy = center + sin(angle).toFloat() * sparkDist
-                    canvas.drawCircle(sx, sy, 3f + random.nextFloat() * 4f, sparkPaint)
-                }
-            }
-            frames.add(bitmap)
-        }
-    }
-
-    fun getFrame(progress: Float): Bitmap? {
-        if (frames.isEmpty()) return null
-        val idx = (progress * (frames.size - 1)).toInt().coerceIn(0, frames.size - 1)
-        return frames[idx]
-    }
-}
+data class CinematicSpark(
+    val angle: Double,
+    val speed: Float,
+    val size: Float,
+    val color: Color
+)
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
@@ -178,7 +124,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (!granted) {
-            speak("È necessario il permesso della fotocamera per la realtà augmented.")
+            speak("È necessario il permesso della fotocamera per la realtà aumentata.")
         }
     }
 
@@ -282,7 +228,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     speak("Bersaglio distrutto!")
                     lockedBoundsState.value = null
                     workflowState = WorkflowState.SEARCHING
-                }, 800)
+                }, 1000)
             }
             WorkflowState.FIRING -> {
                 // Already firing
@@ -656,6 +602,9 @@ fun CameraWorkflowHUD(
     onActionTrigger: () -> Unit,
     onDoubleTap: () -> Unit
 ) {
+    val context = LocalContext.current
+    val density = LocalDensity.current
+
     val ironManGold = Color(0xFFFFCC00)
     val hudDimGold = Color(0x66FFCC00)
     val hudRed = Color(0xFFFF2222)
@@ -673,16 +622,29 @@ fun CameraWorkflowHUD(
         label = "pulseAlpha"
     )
 
-    // Instantiate 16-Frame Bitmap Explosion Sprite Engine
-    val spriteGenerator = remember { ExplosionSpriteGenerator(360) }
-    val explosionProgress = remember { Animatable(0f) }
+    // Coil ImageLoader configured for animated GIF playback
+    val imageLoader = remember(context) {
+        ImageLoader.Builder(context)
+            .components {
+                if (VERSION.SDK_INT >= VERSION_CODES.P) {
+                    add(ImageDecoderDecoder.Factory())
+                } else {
+                    add(GifDecoder.Factory())
+                }
+            }
+            .build()
+    }
+
     val showExplosion = remember { mutableStateOf(false) }
     val missileProgress = remember { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+
+    var targetCenterXPx by remember { mutableFloatStateOf(0f) }
+    var targetCenterYPx by remember { mutableFloatStateOf(0f) }
 
     LaunchedEffect(fireCount) {
         if (fireCount > 0) {
             missileProgress.snapTo(0f)
-            explosionProgress.snapTo(0f)
             
             // Launch Homing Missiles from bottom corners
             missileProgress.animateTo(
@@ -690,13 +652,12 @@ fun CameraWorkflowHUD(
                 animationSpec = tween(durationMillis = 400, easing = FastOutLinearInEasing)
             )
 
-            // Missile Impact at 100% -> Trigger 16-Frame Bitmap Explosion Sprite Sequence
+            // Missile Impact at 100% -> Show User's Real Animated GIF Explosion
             showExplosion.value = true
-            explosionProgress.animateTo(
-                targetValue = 1f,
-                animationSpec = tween(durationMillis = 600, easing = LinearEasing)
-            )
-            showExplosion.value = false
+            scope.launch {
+                delay(800)
+                showExplosion.value = false
+            }
         }
     }
 
@@ -718,6 +679,24 @@ fun CameraWorkflowHUD(
 
             val scaleX = width / max(1f, frameWidth)
             val scaleY = height / max(1f, frameHeight)
+
+            // Calculate live epicenter position for missiles and GIF explosion
+            val currentEpicenterX = if (lockedBounds != null) {
+                val b = lockedBounds
+                (b.left * scaleX + b.right * scaleX) / 2f
+            } else {
+                centerX
+            }
+
+            val currentEpicenterY = if (lockedBounds != null) {
+                val b = lockedBounds
+                (b.top * scaleY + b.bottom * scaleY) / 2f
+            } else {
+                centerY
+            }
+
+            targetCenterXPx = currentEpicenterX
+            targetCenterYPx = currentEpicenterY
 
             // --- 1. Iron Man Helmet Outer Corners ---
             val bracketLen = 120f
@@ -790,39 +769,24 @@ fun CameraWorkflowHUD(
                 }
             }
 
-            // --- 3. Epicenter Coordinates for Homing Missiles & Explosions ---
-            val epicenterX = if (lockedBounds != null) {
-                val b = lockedBounds
-                (b.left * scaleX + b.right * scaleX) / 2f
-            } else {
-                centerX
-            }
-
-            val epicenterY = if (lockedBounds != null) {
-                val b = lockedBounds
-                (b.top * scaleY + b.bottom * scaleY) / 2f
-            } else {
-                centerY
-            }
-
-            // --- 4. DUAL ROCKETS Launching from Bottom Corners ---
+            // --- 3. DUAL ROCKETS Launching from Bottom Corners ---
             val p = missileProgress.value
             if (p > 0f && p < 1f) {
                 val m1StartX = 0f
                 val m1StartY = height
-                val m1ControlX = epicenterX * 0.3f
+                val m1ControlX = currentEpicenterX * 0.3f
                 val m1ControlY = height * 0.5f
 
-                val m1X = (1 - p) * (1 - p) * m1StartX + 2 * (1 - p) * p * m1ControlX + p * p * epicenterX
-                val m1Y = (1 - p) * (1 - p) * m1StartY + 2 * (1 - p) * p * m1ControlY + p * p * epicenterY
+                val m1X = (1 - p) * (1 - p) * m1StartX + 2 * (1 - p) * p * m1ControlX + p * p * currentEpicenterX
+                val m1Y = (1 - p) * (1 - p) * m1StartY + 2 * (1 - p) * p * m1ControlY + p * p * currentEpicenterY
 
                 val m2StartX = width
                 val m2StartY = height
-                val m2ControlX = width - (width - epicenterX) * 0.3f
+                val m2ControlX = width - (width - currentEpicenterX) * 0.3f
                 val m2ControlY = height * 0.5f
 
-                val m2X = (1 - p) * (1 - p) * m2StartX + 2 * (1 - p) * p * m2ControlX + p * p * epicenterX
-                val m2Y = (1 - p) * (1 - p) * m2StartY + 2 * (1 - p) * p * m2ControlY + p * p * epicenterY
+                val m2X = (1 - p) * (1 - p) * m2StartX + 2 * (1 - p) * p * m2ControlX + p * p * currentEpicenterX
+                val m2Y = (1 - p) * (1 - p) * m2StartY + 2 * (1 - p) * p * m2ControlY + p * p * currentEpicenterY
 
                 // Rocket exhaust plumes
                 val m1Brush = Brush.linearGradient(
@@ -846,33 +810,41 @@ fun CameraWorkflowHUD(
                 drawCircle(color = Color.White, radius = 12f, center = Offset(m2X, m2Y))
                 drawCircle(color = hudRed, radius = 20f, center = Offset(m2X, m2Y), style = Stroke(width = 4f))
             }
+        }
 
-            // --- 5. RENDER 16-FRAME BITMAP EXPLOSION SPRITE AT IMPACT ---
-            if (showExplosion.value) {
-                val frameBitmap = spriteGenerator.getFrame(explosionProgress.value)
-                if (frameBitmap != null) {
-                    val spriteWidth = frameBitmap.width
-                    val spriteHeight = frameBitmap.height
-                    drawIntoCanvas { canvas ->
-                        canvas.nativeCanvas.drawBitmap(
-                            frameBitmap,
-                            epicenterX - spriteWidth / 2f,
-                            epicenterY - spriteHeight / 2f,
-                            null
-                        )
-                    }
-                }
+        // --- 4. RENDER THE USER'S REAL ANIMATED EXPLOSION GIF (R.drawable.explosion) AT IMPACT ---
+        if (showExplosion.value) {
+            val gifSizeDp = 280.dp
+            val halfSizePx = with(density) { gifSizeDp.toPx() / 2f }
+
+            val offsetXDp = with(density) { (targetCenterXPx - halfSizePx).toDp() }
+            val offsetYDp = with(density) { (targetCenterYPx - halfSizePx).toDp() }
+
+            Box(
+                modifier = Modifier
+                    .offset(x = offsetXDp, y = offsetYDp)
+                    .size(gifSizeDp)
+            ) {
+                AsyncImage(
+                    model = ImageRequest.Builder(context)
+                        .data(R.drawable.explosion)
+                        .crossfade(true)
+                        .build(),
+                    imageLoader = imageLoader,
+                    contentDescription = "Real Animated Explosion GIF",
+                    modifier = Modifier.fillMaxSize()
+                )
             }
         }
 
-        // --- 6. HUD Telemetry & Instructions ---
+        // --- 5. HUD Telemetry & Instructions ---
         Column(
             modifier = Modifier
                 .padding(70.dp, 35.dp)
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // SPRITE ENGINE TACTICAL",
+                text = "JARVIS // USER REAL GIF ENGINE",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -912,7 +884,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "ENGINE: 16-FRAME ARGB SPRITES",
+                text = "ASSET: R.drawable.explosion (GIF)",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -941,7 +913,7 @@ fun CameraWorkflowHUD(
                 text = when (workflowState) {
                     WorkflowState.SEARCHING -> "[ MIRINO ROSSO = BERSAGLIO NELL'AREA ]"
                     WorkflowState.LOCKED -> "[ 1° CLICK CUFFIA = LANCIA MISSILI ] | [ DOPPIO TAP = SBLOCCA ]"
-                    WorkflowState.FIRING -> "IMPATTO ED ESPLOSIONE SPRITE..."
+                    WorkflowState.FIRING -> "IMPATTO ED ESPLOSIONE GIF REALE..."
                 },
                 color = hudDimGold,
                 fontSize = 10.sp,
