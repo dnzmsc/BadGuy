@@ -194,11 +194,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         playBeepSound(400.0, 100)
     }
 
-    /**
-     * Space Movie Reticle Lock Workflow:
-     * 1st Trigger: Locks onto object inside central square. Red reticle DETACHES from center and TRACKS object across screen.
-     * 2nd Trigger: Fires missiles at live tracked reticle position with cinematic explosion.
-     */
     fun handleActionTrigger() {
         when (workflowState) {
             WorkflowState.SEARCHING -> {
@@ -217,9 +212,11 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             WorkflowState.LOCKED -> {
                 workflowState = WorkflowState.FIRING
                 fireEventCount.value++
-                playCinematicExplosionSound()
-                speak("Bersaglio distrutto!")
+                playMissileLaunchSound()
+                speak("Lancio missili!")
                 android.os.Handler(mainLooper).postDelayed({
+                    playCinematicExplosionSound()
+                    speak("Bersaglio distrutto!")
                     lockedBoundsState.value = null
                     workflowState = WorkflowState.SEARCHING
                 }, 800)
@@ -272,7 +269,6 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         cameraFrameWidth = imgWidth
         cameraFrameHeight = imgHeight
 
-        // Beep when an object enters the central square during SEARCHING
         if (workflowState == WorkflowState.SEARCHING && inCenter) {
             val now = System.currentTimeMillis()
             if (now - lastCenterBeepTime > 2000) {
@@ -281,14 +277,13 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
             }
         }
 
-        // Space Movie Dynamic Tracking in LOCKED state
         if (workflowState == WorkflowState.LOCKED) {
             if (bounds != null) {
                 lockedBoundsState.value = bounds
                 framesWithoutTarget = 0
             } else {
                 framesWithoutTarget++
-                if (framesWithoutTarget > 25) { // ~0.8s without target
+                if (framesWithoutTarget > 25) {
                     speak("Bersaglio perso")
                     lockedBoundsState.value = null
                     workflowState = WorkflowState.SEARCHING
@@ -332,6 +327,28 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         }.start()
     }
 
+    private fun playMissileLaunchSound() {
+        Thread {
+            try {
+                val sampleRate = 44100
+                val numSamples = (sampleRate * 0.35).toInt()
+                val samples = ShortArray(numSamples)
+                val random = java.util.Random()
+                for (i in 0 until numSamples) {
+                    val t = i.toDouble() / sampleRate
+                    val freq = 300.0 + (i * 4.0)
+                    val noise = (random.nextDouble() * 2.0 - 1.0) * 0.4
+                    val whoosh = sin(2.0 * Math.PI * freq * t) * 0.6
+                    val envelope = sin(Math.PI * (i.toDouble() / numSamples))
+                    samples[i] = ((whoosh + noise) * 32767 * envelope).toInt().toShort()
+                }
+                playAudioSamples(samples)
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+        }.start()
+    }
+
     private fun playBeepSound(freq: Double, durationMs: Int) {
         Thread {
             try {
@@ -359,9 +376,9 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                 for (i in 0 until numSamples) {
                     val t = i.toDouble() / sampleRate
                     val envelope = 1.0 - (i.toDouble() / numSamples)
-                    val subBass = sin(2.0 * Math.PI * 50.0 * t) * Math.exp(-t * 3.0)
+                    val subBass = sin(2.0 * Math.PI * 45.0 * t) * Math.exp(-t * 2.5)
                     val noise = (random.nextDouble() * 2.0 - 1.0)
-                    val crackle = if (random.nextDouble() > 0.95) (random.nextDouble() * 2.0 - 1.0) * 0.8 else 0.0
+                    val crackle = if (random.nextDouble() > 0.94) (random.nextDouble() * 2.0 - 1.0) * 0.9 else 0.0
                     val mixed = (subBass * 0.5 + noise * 0.4 + crackle * 0.1)
                     samples[i] = (mixed * 32767 * envelope).toInt().toShort()
                 }
@@ -490,6 +507,7 @@ fun BadGuyARApp(
             workflowState = workflowState,
             isObjectInCenter = isObjectInCenter,
             fireCount = fireCount,
+            detectedBounds = detectedBounds,
             lockedBounds = lockedBounds,
             distance = distance,
             speed = speed,
@@ -566,6 +584,7 @@ fun CameraWorkflowHUD(
     workflowState: WorkflowState,
     isObjectInCenter: Boolean,
     fireCount: Int,
+    detectedBounds: Rect?,
     lockedBounds: Rect?,
     distance: Int,
     speed: Int,
@@ -594,17 +613,27 @@ fun CameraWorkflowHUD(
     val explosionParticles = remember { mutableStateOf(listOf<CinematicSpark>()) }
     val shockwaveRadius = remember { mutableStateOf(0f) }
     val showExplosion = remember { mutableStateOf(false) }
+    val missileProgress = remember { Animatable(0f) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(fireCount) {
         if (fireCount > 0) {
+            missileProgress.snapTo(0f)
+            
+            // Launch Homing Missiles from bottom corners
+            missileProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 400, easing = FastOutLinearInEasing)
+            )
+
+            // Missile Impact at 100% -> Trigger Explosions
             showExplosion.value = true
             shockwaveRadius.value = 10f
 
-            val sparks = (0..90).map {
+            val sparks = (0..100).map {
                 CinematicSpark(
                     angle = Random.nextDouble(0.0, 2.0 * Math.PI),
-                    speed = Random.nextFloat() * 30f + 10f,
+                    speed = Random.nextFloat() * 35f + 12f,
                     size = Random.nextFloat() * 12f + 4f,
                     color = listOf(fireOrange, fireYellow, hudRed, Color.White, ironManGold).random()
                 )
@@ -614,7 +643,7 @@ fun CameraWorkflowHUD(
             scope.launch {
                 repeat(20) {
                     delay(25)
-                    shockwaveRadius.value += 18f
+                    shockwaveRadius.value += 20f
                 }
                 showExplosion.value = false
                 delay(250)
@@ -639,7 +668,6 @@ fun CameraWorkflowHUD(
             val centerX = width / 2f
             val centerY = height / 2f
 
-            // Matrix scale factors mapping camera frame coordinates [0..frameWidth, 0..frameHeight] to screen [0..width, 0..height]
             val scaleX = width / max(1f, frameWidth)
             val scaleY = height / max(1f, frameHeight)
 
@@ -669,7 +697,6 @@ fun CameraWorkflowHUD(
                     val retBottom = centerY + reticleH / 2f
                     val cornerLen = 25f
 
-                    // If an object is inside the central reticle, turns BRIGHT RED! Otherwise GOLD.
                     val reticleColor = if (isObjectInCenter) hudRed.copy(alpha = pulseAlpha) else ironManGold.copy(alpha = pulseAlpha)
 
                     drawLine(reticleColor, Offset(retLeft, retTop), Offset(retLeft + cornerLen, retTop), 5f)
@@ -687,7 +714,6 @@ fun CameraWorkflowHUD(
                     drawCircle(reticleColor, 4f, Offset(centerX, centerY))
                 }
                 WorkflowState.LOCKED, WorkflowState.FIRING -> {
-                    // SPACE MOVIE RETICLE LOCK: Red reticle detaches from center and TRACKS object across screen!
                     val bounds = lockedBounds ?: Rect(frameWidth * 0.35f, frameHeight * 0.35f, frameWidth * 0.65f, frameHeight * 0.65f)
 
                     val tLeft = bounds.left * scaleX
@@ -716,7 +742,7 @@ fun CameraWorkflowHUD(
                 }
             }
 
-            // --- 3. Cinematic Fire & Spark Explosions AT LIVE TRACKED RETICLE POSITION ---
+            // --- 3. Epicenter Coordinates for Homing Missiles & Explosions ---
             val epicenterX = if (lockedBounds != null) {
                 val b = lockedBounds
                 (b.left * scaleX + b.right * scaleX) / 2f
@@ -731,28 +757,63 @@ fun CameraWorkflowHUD(
                 centerY
             }
 
-            if (showExplosion.value) {
-                drawCircle(color = Color.White, radius = 60f, center = Offset(epicenterX, epicenterY))
-                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(epicenterX, epicenterY), style = Stroke(width = 8f))
-                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.7f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 4f))
+            // --- 4. DUAL HOMING MISSILES Launching from Bottom Corners ---
+            val p = missileProgress.value
+            if (p > 0f && p < 1f) {
+                val m1StartX = 0f
+                val m1StartY = height
+                val m1ControlX = epicenterX * 0.3f
+                val m1ControlY = height * 0.5f
+
+                val m1X = (1 - p) * (1 - p) * m1StartX + 2 * (1 - p) * p * m1ControlX + p * p * epicenterX
+                val m1Y = (1 - p) * (1 - p) * m1StartY + 2 * (1 - p) * p * m1ControlY + p * p * epicenterY
+
+                val m2StartX = width
+                val m2StartY = height
+                val m2ControlX = width - (width - epicenterX) * 0.3f
+                val m2ControlY = height * 0.5f
+
+                val m2X = (1 - p) * (1 - p) * m2StartX + 2 * (1 - p) * p * m2ControlX + p * p * epicenterX
+                val m2Y = (1 - p) * (1 - p) * m2StartY + 2 * (1 - p) * p * m2ControlY + p * p * epicenterY
+
+                // Rocket fire trails
+                drawLine(color = fireOrange, start = Offset(m1StartX, m1StartY), end = Offset(m1X, m1Y), strokeWidth = 10f)
+                drawLine(color = fireYellow, start = Offset(m1StartX, m1StartY), end = Offset(m1X, m1Y), strokeWidth = 5f)
+
+                drawLine(color = fireOrange, start = Offset(m2StartX, m2StartY), end = Offset(m2X, m2Y), strokeWidth = 10f)
+                drawLine(color = fireYellow, start = Offset(m2StartX, m2StartY), end = Offset(m2X, m2Y), strokeWidth = 5f)
+
+                // Glowing rocket warheads
+                drawCircle(color = Color.White, radius = 10f, center = Offset(m1X, m1Y))
+                drawCircle(color = hudRed, radius = 18f, center = Offset(m1X, m1Y), style = Stroke(width = 3f))
+
+                drawCircle(color = Color.White, radius = 10f, center = Offset(m2X, m2Y))
+                drawCircle(color = hudRed, radius = 18f, center = Offset(m2X, m2Y), style = Stroke(width = 3f))
             }
 
-            explosionParticles.value.forEach { p ->
-                val dist = p.speed * 35f
-                val px = epicenterX + (cos(p.angle) * dist).toFloat()
-                val py = epicenterY + (sin(p.angle) * dist).toFloat()
-                drawCircle(color = p.color, radius = p.size, center = Offset(px, py))
+            // --- 5. Cinematic Fire & Spark Explosions AT IMPACT ---
+            if (showExplosion.value) {
+                drawCircle(color = Color.White, radius = 70f, center = Offset(epicenterX, epicenterY))
+                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(epicenterX, epicenterY), style = Stroke(width = 10f))
+                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.7f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 5f))
+            }
+
+            explosionParticles.value.forEach { spark ->
+                val dist = spark.speed * 35f
+                val px = epicenterX + (cos(spark.angle) * dist).toFloat()
+                val py = epicenterY + (sin(spark.angle) * dist).toFloat()
+                drawCircle(color = spark.color, radius = spark.size, center = Offset(px, py))
             }
         }
 
-        // --- 4. HUD Telemetry & Instructions ---
+        // --- 6. HUD Telemetry & Instructions ---
         Column(
             modifier = Modifier
                 .padding(70.dp, 35.dp)
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // RETICLE TRACKING",
+                text = "JARVIS // DUAL MISSILE TACTICAL",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -769,7 +830,7 @@ fun CameraWorkflowHUD(
                 text = when (workflowState) {
                     WorkflowState.SEARCHING -> if (isObjectInCenter) "STATO: [BERSAGLIO AL CENTRO!]" else "STATO: [SCANSIONE CENTRALE...]"
                     WorkflowState.LOCKED -> "STATO: [BERSAGLIO TRACCIATO IN MOVIMENTO]"
-                    WorkflowState.FIRING -> "STATO: [FUOCO!]"
+                    WorkflowState.FIRING -> "STATO: [LANCIO MISSILI IN CORSO!]"
                 },
                 color = if (workflowState == WorkflowState.LOCKED || isObjectInCenter) hudRed else ironManGold,
                 fontSize = 11.sp,
@@ -792,7 +853,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "RETICLE MATRIX SCALE: OK",
+                text = "SYSTEM: HOMING BALLISTIC MISSILES",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -807,9 +868,9 @@ fun CameraWorkflowHUD(
         ) {
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> if (isObjectInCenter) "[ 1° CLICK CUFFIA: LOCKA IL BERSAGLIO CENTRALE ]" else "PORTA L'OGGETTO NEL MIRINO CENTRALE..."
+                    WorkflowState.SEARCHING -> if (isObjectInCenter) "[ 1° CLICK CUFFIA: LOCKA BERSAGLIO ]" else "PORTA L'OGGETTO NEL MIRINO CENTRALE..."
                     WorkflowState.LOCKED -> "BERSAGLIO TRACCIATO IN MOVIMENTO // DISTANZA: ${distance}M"
-                    WorkflowState.FIRING -> "ESPLOSIONE SUL BERSAGLIO TRACCIATO..."
+                    WorkflowState.FIRING -> "MISSILI IN VOLO DAI MANUBRI..."
                 },
                 color = if (workflowState == WorkflowState.LOCKED || isObjectInCenter) hudRed else ironManGold,
                 fontSize = 14.sp,
@@ -819,9 +880,9 @@ fun CameraWorkflowHUD(
             Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = when (workflowState) {
-                    WorkflowState.SEARCHING -> "[ MIRINO ROSSO = OGGETTO DENTRO IL MIRINO ]"
-                    WorkflowState.LOCKED -> "[ 1° CLICK CUFFIA = SPARO ] | [ DOPPIO TAP = SBLOCCA ]"
-                    WorkflowState.FIRING -> "MISSILE IMPATTATO..."
+                    WorkflowState.SEARCHING -> "[ MIRINO ROSSO = BERSAGLIO NELL'AREA ]"
+                    WorkflowState.LOCKED -> "[ 1° CLICK CUFFIA = LANCIA MISSILI ] | [ DOPPIO TAP = SBLOCCA ]"
+                    WorkflowState.FIRING -> "IMPATTO E DEDONAZIONE..."
                 },
                 color = hudDimGold,
                 fontSize = 10.sp,
