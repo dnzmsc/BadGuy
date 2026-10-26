@@ -31,11 +31,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -647,7 +645,7 @@ fun CameraWorkflowHUD(
                 animationSpec = tween(durationMillis = 400, easing = FastOutLinearInEasing)
             )
 
-            // Missile Impact at 100% -> Show User's Real Animated GIF Explosion for 2.2s
+            // Missile Impact at 100% -> Show User's New Explosion GIF Asset for 2.2s
             showExplosion.value = true
             scope.launch {
                 delay(2200)
@@ -806,7 +804,7 @@ fun CameraWorkflowHUD(
             }
         }
 
-        // --- 4. RENDER THE USER'S REAL ANIMATED EXPLOSION GIF WITH HARDWARE SCREEN BLENDMODE ---
+        // --- 4. RENDER THE USER'S NEW REAL ANIMATED EXPLOSION GIF (R.drawable.explosion) AT IMPACT ---
         if (showExplosion.value) {
             val gifSizeDp = 340.dp
             val halfSizePx = with(density) { gifSizeDp.toPx() / 2f }
@@ -825,10 +823,8 @@ fun CameraWorkflowHUD(
                         .crossfade(true)
                         .build(),
                     imageLoader = imageLoader,
-                    contentDescription = "Real Animated Explosion GIF",
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .graphicsLayer(blendMode = BlendMode.Screen)
+                    contentDescription = "User Real Explosion GIF",
+                    modifier = Modifier.fillMaxSize()
                 )
             }
         }
@@ -840,7 +836,7 @@ fun CameraWorkflowHUD(
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // HARDWARE SCREEN GIF",
+                text = "JARVIS // USER GIF EXPLOSION ENGINE",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -880,7 +876,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "GRAPHICS LAYER (SCREEN): OK",
+                text = "NEW USER GIF ASSET: LOADED",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -909,7 +905,7 @@ fun CameraWorkflowHUD(
                 text = when (workflowState) {
                     WorkflowState.SEARCHING -> "[ MIRINO ROSSO = BERSAGLIO NELL'AREA ]"
                     WorkflowState.LOCKED -> "[ 1° CLICK CUFFIA = LANCIA MISSILI ] | [ DOPPIO TAP = SBLOCCA ]"
-                    WorkflowState.FIRING -> "ESPLOSIONE GIF TRASPARENTE (2.2 SEC)..."
+                    WorkflowState.FIRING -> "ESPLOSIONE NUOVA GIF REALE IN CORSO..."
                 },
                 color = hudDimGold,
                 fontSize = 10.sp,
