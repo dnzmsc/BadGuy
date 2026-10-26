@@ -2,6 +2,7 @@ package com.example.badguy
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -32,6 +33,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
@@ -47,8 +50,6 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.objects.ObjectDetection
 import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import java.util.Locale
 import java.util.concurrent.Executors
 import kotlin.math.abs
@@ -63,12 +64,73 @@ enum class WorkflowState {
     FIRING
 }
 
-data class CinematicSpark(
-    val angle: Double,
-    val speed: Float,
-    val size: Float,
-    val color: Color
-)
+/**
+ * 16-Frame Bitmap Explosion Sprite Engine
+ * Pre-renders 16 high-resolution bitmap textures with volumetric fireball radial gradients,
+ * dark billowing charcoal smoke, white-hot fire core, and flying sparks.
+ */
+class ExplosionSpriteGenerator(size: Int = 360) {
+    val frames = mutableListOf<Bitmap>()
+
+    init {
+        val numFrames = 16
+        for (i in 0 until numFrames) {
+            val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+            val canvas = android.graphics.Canvas(bitmap)
+            val progress = i.toFloat() / numFrames.toFloat()
+            val center = size / 2f
+            val radius = (size / 2f - 20f) * progress
+
+            if (progress < 0.85f) {
+                // Layer 1: Dark Billowing Charcoal Smoke
+                val smokePaint = android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    color = android.graphics.Color.argb((180 * (1f - progress)).toInt(), 35, 25, 25)
+                }
+                canvas.drawCircle(center, center, maxOf(1f, radius * 1.25f), smokePaint)
+
+                // Layer 2: Volumetric Fireball Gradient (White -> Yellow -> Orange -> Crimson -> Transparent)
+                val firePaint = android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    shader = android.graphics.RadialGradient(
+                        center, center, maxOf(1f, radius),
+                        intArrayOf(
+                            android.graphics.Color.WHITE,
+                            android.graphics.Color.rgb(255, 230, 0),
+                            android.graphics.Color.rgb(255, 80, 0),
+                            android.graphics.Color.rgb(200, 0, 0),
+                            android.graphics.Color.TRANSPARENT
+                        ),
+                        floatArrayOf(0f, 0.25f, 0.55f, 0.85f, 1f),
+                        android.graphics.Shader.TileMode.CLAMP
+                    )
+                }
+                canvas.drawCircle(center, center, maxOf(1f, radius), firePaint)
+
+                // Layer 3: Flying Sparks and Debris
+                val sparkPaint = android.graphics.Paint().apply {
+                    isAntiAlias = true
+                    color = android.graphics.Color.rgb(255, 240, 150)
+                }
+                val random = java.util.Random(i.toLong() * 100)
+                repeat(25) {
+                    val angle = random.nextDouble() * 2 * Math.PI
+                    val sparkDist = radius * (0.8f + random.nextFloat() * 0.5f)
+                    val sx = center + cos(angle).toFloat() * sparkDist
+                    val sy = center + sin(angle).toFloat() * sparkDist
+                    canvas.drawCircle(sx, sy, 3f + random.nextFloat() * 4f, sparkPaint)
+                }
+            }
+            frames.add(bitmap)
+        }
+    }
+
+    fun getFrame(progress: Float): Bitmap? {
+        if (frames.isEmpty()) return null
+        val idx = (progress * (frames.size - 1)).toInt().coerceIn(0, frames.size - 1)
+        return frames[idx]
+    }
+}
 
 class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
 
@@ -116,7 +178,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (!granted) {
-            speak("È necessario il permesso della fotocamera per la realtà aumentata.")
+            speak("È necessario il permesso della fotocamera per la realtà augmented.")
         }
     }
 
@@ -611,15 +673,16 @@ fun CameraWorkflowHUD(
         label = "pulseAlpha"
     )
 
-    val explosionParticles = remember { mutableStateOf(listOf<CinematicSpark>()) }
-    val shockwaveRadius = remember { mutableStateOf(0f) }
+    // Instantiate 16-Frame Bitmap Explosion Sprite Engine
+    val spriteGenerator = remember { ExplosionSpriteGenerator(360) }
+    val explosionProgress = remember { Animatable(0f) }
     val showExplosion = remember { mutableStateOf(false) }
     val missileProgress = remember { Animatable(0f) }
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(fireCount) {
         if (fireCount > 0) {
             missileProgress.snapTo(0f)
+            explosionProgress.snapTo(0f)
             
             // Launch Homing Missiles from bottom corners
             missileProgress.animateTo(
@@ -627,29 +690,13 @@ fun CameraWorkflowHUD(
                 animationSpec = tween(durationMillis = 400, easing = FastOutLinearInEasing)
             )
 
-            // Missile Impact at 100% -> Volumetric Fireball & Spark Explosions
+            // Missile Impact at 100% -> Trigger 16-Frame Bitmap Explosion Sprite Sequence
             showExplosion.value = true
-            shockwaveRadius.value = 15f
-
-            val sparks = (0..120).map {
-                CinematicSpark(
-                    angle = Random.nextDouble(0.0, 2.0 * Math.PI),
-                    speed = Random.nextFloat() * 40f + 15f,
-                    size = Random.nextFloat() * 14f + 4f,
-                    color = listOf(fireOrange, fireYellow, hudRed, Color.White, ironManGold).random()
-                )
-            }
-            explosionParticles.value = sparks
-
-            scope.launch {
-                repeat(22) {
-                    delay(25)
-                    shockwaveRadius.value += 22f
-                }
-                showExplosion.value = false
-                delay(250)
-                explosionParticles.value = emptyList()
-            }
+            explosionProgress.animateTo(
+                targetValue = 1f,
+                animationSpec = tween(durationMillis = 600, easing = LinearEasing)
+            )
+            showExplosion.value = false
         }
     }
 
@@ -777,7 +824,7 @@ fun CameraWorkflowHUD(
                 val m2X = (1 - p) * (1 - p) * m2StartX + 2 * (1 - p) * p * m2ControlX + p * p * epicenterX
                 val m2Y = (1 - p) * (1 - p) * m2StartY + 2 * (1 - p) * p * m2ControlY + p * p * epicenterY
 
-                // Rocket exhaust plumes (Linear Gradient Yellow -> Orange -> Smoke)
+                // Rocket exhaust plumes
                 val m1Brush = Brush.linearGradient(
                     colors = listOf(Color.White, fireYellow, fireOrange, Color(0x66333333)),
                     start = Offset(m1X, m1Y),
@@ -792,7 +839,7 @@ fun CameraWorkflowHUD(
                 drawLine(brush = m1Brush, start = Offset(m1StartX, m1StartY), end = Offset(m1X, m1Y), strokeWidth = 14f)
                 drawLine(brush = m2Brush, start = Offset(m2StartX, m2StartY), end = Offset(m2X, m2Y), strokeWidth = 14f)
 
-                // Rocket metallic warheads
+                // Metallic rocket warheads
                 drawCircle(color = Color.White, radius = 12f, center = Offset(m1X, m1Y))
                 drawCircle(color = hudRed, radius = 20f, center = Offset(m1X, m1Y), style = Stroke(width = 4f))
 
@@ -800,42 +847,21 @@ fun CameraWorkflowHUD(
                 drawCircle(color = hudRed, radius = 20f, center = Offset(m2X, m2Y), style = Stroke(width = 4f))
             }
 
-            // --- 5. VOLUMETRIC REALISTIC FIREBALL EXPLOSIONS AT IMPACT ---
+            // --- 5. RENDER 16-FRAME BITMAP EXPLOSION SPRITE AT IMPACT ---
             if (showExplosion.value) {
-                val explosionRadius = maxOf(40f, shockwaveRadius.value * 2.2f)
-
-                // Volumetric Fireball Gradient (White Core -> Bright Yellow -> Burning Crimson -> Dark Smoke -> Alpha)
-                val fireballBrush = Brush.radialGradient(
-                    colors = listOf(
-                        Color.White,
-                        Color(0xFFFFEE00), // Bright Yellow
-                        Color(0xFFFF5500), // Burning Orange
-                        Color(0xFFFF0000), // Crimson Red
-                        Color(0xCC221100), // Dark Charcoal Smoke
-                        Color.Transparent
-                    ),
-                    center = Offset(epicenterX, epicenterY),
-                    radius = maxOf(10f, explosionRadius)
-                )
-
-                // Draw volumetric fireball expansion
-                drawCircle(
-                    brush = fireballBrush,
-                    radius = explosionRadius,
-                    center = Offset(epicenterX, epicenterY)
-                )
-
-                // Expanding shockwaves
-                drawCircle(color = Color.White, radius = shockwaveRadius.value * 0.5f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 6f))
-                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(epicenterX, epicenterY), style = Stroke(width = 12f))
-                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.8f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 6f))
-            }
-
-            explosionParticles.value.forEach { spark ->
-                val dist = spark.speed * 35f
-                val px = epicenterX + (cos(spark.angle) * dist).toFloat()
-                val py = epicenterY + (sin(spark.angle) * dist).toFloat()
-                drawCircle(color = spark.color, radius = spark.size, center = Offset(px, py))
+                val frameBitmap = spriteGenerator.getFrame(explosionProgress.value)
+                if (frameBitmap != null) {
+                    val spriteWidth = frameBitmap.width
+                    val spriteHeight = frameBitmap.height
+                    drawIntoCanvas { canvas ->
+                        canvas.nativeCanvas.drawBitmap(
+                            frameBitmap,
+                            epicenterX - spriteWidth / 2f,
+                            epicenterY - spriteHeight / 2f,
+                            null
+                        )
+                    }
+                }
             }
         }
 
@@ -846,7 +872,7 @@ fun CameraWorkflowHUD(
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // VOLUMETRIC TACTICAL",
+                text = "JARVIS // SPRITE ENGINE TACTICAL",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -886,7 +912,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "VOLUMETRIC FIREBALL FX: READY",
+                text = "ENGINE: 16-FRAME ARGB SPRITES",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -915,7 +941,7 @@ fun CameraWorkflowHUD(
                 text = when (workflowState) {
                     WorkflowState.SEARCHING -> "[ MIRINO ROSSO = BERSAGLIO NELL'AREA ]"
                     WorkflowState.LOCKED -> "[ 1° CLICK CUFFIA = LANCIA MISSILI ] | [ DOPPIO TAP = SBLOCCA ]"
-                    WorkflowState.FIRING -> "IMPATTO E DEDONAZIONE VOLUMETRICA..."
+                    WorkflowState.FIRING -> "IMPATTO ED ESPLOSIONE SPRITE..."
                 },
                 color = hudDimGold,
                 fontSize = 10.sp,
