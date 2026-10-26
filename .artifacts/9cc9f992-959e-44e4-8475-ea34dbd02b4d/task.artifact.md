@@ -1,6 +1,5 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add Coil Compose & Coil Gif dependencies to `build.gradle.kts`
-- [x] **New**: Apply `BlendMode.Screen` to automatically remove black/dark backgrounds from GIF assets
-- [x] **New**: Extend explosion display duration to 2.2 seconds
+- [x] **New**: Replace `ColorFilter.tint` with `Modifier.graphicsLayer(blendMode = BlendMode.Screen)` for full-color GIF compositing
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)

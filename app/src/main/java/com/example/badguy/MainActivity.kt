@@ -34,8 +34,8 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -223,7 +223,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
                     speak("Bersaglio distrutto!")
                     lockedBoundsState.value = null
                     workflowState = WorkflowState.SEARCHING
-                }, 2200) // Extended duration: 2.2 seconds
+                }, 2200)
             }
             WorkflowState.FIRING -> {
                 // Already firing
@@ -647,10 +647,10 @@ fun CameraWorkflowHUD(
                 animationSpec = tween(durationMillis = 400, easing = FastOutLinearInEasing)
             )
 
-            // Missile Impact at 100% -> Show User's Real Animated GIF Explosion for 2.2s with Screen BlendMode
+            // Missile Impact at 100% -> Show User's Real Animated GIF Explosion for 2.2s
             showExplosion.value = true
             scope.launch {
-                delay(2200) // Extended duration: 2.2 seconds
+                delay(2200)
                 showExplosion.value = false
             }
         }
@@ -806,7 +806,7 @@ fun CameraWorkflowHUD(
             }
         }
 
-        // --- 4. RENDER THE USER'S REAL ANIMATED EXPLOSION GIF WITH AUTOMATIC BLACK BACKGROUND REMOVAL ---
+        // --- 4. RENDER THE USER'S REAL ANIMATED EXPLOSION GIF WITH HARDWARE SCREEN BLENDMODE ---
         if (showExplosion.value) {
             val gifSizeDp = 340.dp
             val halfSizePx = with(density) { gifSizeDp.toPx() / 2f }
@@ -826,8 +826,9 @@ fun CameraWorkflowHUD(
                         .build(),
                     imageLoader = imageLoader,
                     contentDescription = "Real Animated Explosion GIF",
-                    colorFilter = ColorFilter.tint(Color.White, BlendMode.Screen),
-                    modifier = Modifier.fillMaxSize()
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer(blendMode = BlendMode.Screen)
                 )
             }
         }
@@ -839,7 +840,7 @@ fun CameraWorkflowHUD(
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // BLACK-KEYED GIF ENGINE",
+                text = "JARVIS // HARDWARE SCREEN GIF",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -879,7 +880,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "BLACK KEYING (BLENDMODE.SCREEN): OK",
+                text = "GRAPHICS LAYER (SCREEN): OK",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
