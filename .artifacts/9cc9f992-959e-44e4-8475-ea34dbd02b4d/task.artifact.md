@@ -1,8 +1,6 @@
 - [x] Configure git repository and remote origin (https://github.com/dnzmsc/BadGuy.git)
 - [x] Add ML Kit Object Detection dependency to `build.gradle.kts`
-- [x] **New**: Implement dual homing missiles launching from bottom corners `(0, height)` and `(width, height)`
-- [x] **New**: Implement curved ballistic trajectories with glowing rocket fire trails
-- [x] **New**: Implement missile impact detonation on tracked reticle position
-- [x] **New**: Implement missile launch whoosh audio + heavy impact explosion
+- [x] **New**: Implement volumetric `Brush.radialGradient` explosion fireballs with white-hot core, crimson flame, and charcoal smoke
+- [x] **New**: Implement sleek rocket warheads with linear gradient exhaust plumes
 - [x] Sync gradle, build app, and deploy to connected device (`RFGL34STWPJ`)
 - [x] Commit and push changes to GitHub repository (`dnzmsc/BadGuy`)

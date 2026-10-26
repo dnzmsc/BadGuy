@@ -29,6 +29,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
@@ -626,24 +627,24 @@ fun CameraWorkflowHUD(
                 animationSpec = tween(durationMillis = 400, easing = FastOutLinearInEasing)
             )
 
-            // Missile Impact at 100% -> Trigger Explosions
+            // Missile Impact at 100% -> Volumetric Fireball & Spark Explosions
             showExplosion.value = true
-            shockwaveRadius.value = 10f
+            shockwaveRadius.value = 15f
 
-            val sparks = (0..100).map {
+            val sparks = (0..120).map {
                 CinematicSpark(
                     angle = Random.nextDouble(0.0, 2.0 * Math.PI),
-                    speed = Random.nextFloat() * 35f + 12f,
-                    size = Random.nextFloat() * 12f + 4f,
+                    speed = Random.nextFloat() * 40f + 15f,
+                    size = Random.nextFloat() * 14f + 4f,
                     color = listOf(fireOrange, fireYellow, hudRed, Color.White, ironManGold).random()
                 )
             }
             explosionParticles.value = sparks
 
             scope.launch {
-                repeat(20) {
+                repeat(22) {
                     delay(25)
-                    shockwaveRadius.value += 20f
+                    shockwaveRadius.value += 22f
                 }
                 showExplosion.value = false
                 delay(250)
@@ -757,7 +758,7 @@ fun CameraWorkflowHUD(
                 centerY
             }
 
-            // --- 4. DUAL HOMING MISSILES Launching from Bottom Corners ---
+            // --- 4. DUAL ROCKETS Launching from Bottom Corners ---
             val p = missileProgress.value
             if (p > 0f && p < 1f) {
                 val m1StartX = 0f
@@ -776,26 +777,58 @@ fun CameraWorkflowHUD(
                 val m2X = (1 - p) * (1 - p) * m2StartX + 2 * (1 - p) * p * m2ControlX + p * p * epicenterX
                 val m2Y = (1 - p) * (1 - p) * m2StartY + 2 * (1 - p) * p * m2ControlY + p * p * epicenterY
 
-                // Rocket fire trails
-                drawLine(color = fireOrange, start = Offset(m1StartX, m1StartY), end = Offset(m1X, m1Y), strokeWidth = 10f)
-                drawLine(color = fireYellow, start = Offset(m1StartX, m1StartY), end = Offset(m1X, m1Y), strokeWidth = 5f)
+                // Rocket exhaust plumes (Linear Gradient Yellow -> Orange -> Smoke)
+                val m1Brush = Brush.linearGradient(
+                    colors = listOf(Color.White, fireYellow, fireOrange, Color(0x66333333)),
+                    start = Offset(m1X, m1Y),
+                    end = Offset(m1StartX, m1StartY)
+                )
+                val m2Brush = Brush.linearGradient(
+                    colors = listOf(Color.White, fireYellow, fireOrange, Color(0x66333333)),
+                    start = Offset(m2X, m2Y),
+                    end = Offset(m2StartX, m2StartY)
+                )
 
-                drawLine(color = fireOrange, start = Offset(m2StartX, m2StartY), end = Offset(m2X, m2Y), strokeWidth = 10f)
-                drawLine(color = fireYellow, start = Offset(m2StartX, m2StartY), end = Offset(m2X, m2Y), strokeWidth = 5f)
+                drawLine(brush = m1Brush, start = Offset(m1StartX, m1StartY), end = Offset(m1X, m1Y), strokeWidth = 14f)
+                drawLine(brush = m2Brush, start = Offset(m2StartX, m2StartY), end = Offset(m2X, m2Y), strokeWidth = 14f)
 
-                // Glowing rocket warheads
-                drawCircle(color = Color.White, radius = 10f, center = Offset(m1X, m1Y))
-                drawCircle(color = hudRed, radius = 18f, center = Offset(m1X, m1Y), style = Stroke(width = 3f))
+                // Rocket metallic warheads
+                drawCircle(color = Color.White, radius = 12f, center = Offset(m1X, m1Y))
+                drawCircle(color = hudRed, radius = 20f, center = Offset(m1X, m1Y), style = Stroke(width = 4f))
 
-                drawCircle(color = Color.White, radius = 10f, center = Offset(m2X, m2Y))
-                drawCircle(color = hudRed, radius = 18f, center = Offset(m2X, m2Y), style = Stroke(width = 3f))
+                drawCircle(color = Color.White, radius = 12f, center = Offset(m2X, m2Y))
+                drawCircle(color = hudRed, radius = 20f, center = Offset(m2X, m2Y), style = Stroke(width = 4f))
             }
 
-            // --- 5. Cinematic Fire & Spark Explosions AT IMPACT ---
+            // --- 5. VOLUMETRIC REALISTIC FIREBALL EXPLOSIONS AT IMPACT ---
             if (showExplosion.value) {
-                drawCircle(color = Color.White, radius = 70f, center = Offset(epicenterX, epicenterY))
-                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(epicenterX, epicenterY), style = Stroke(width = 10f))
-                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.7f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 5f))
+                val explosionRadius = maxOf(40f, shockwaveRadius.value * 2.2f)
+
+                // Volumetric Fireball Gradient (White Core -> Bright Yellow -> Burning Crimson -> Dark Smoke -> Alpha)
+                val fireballBrush = Brush.radialGradient(
+                    colors = listOf(
+                        Color.White,
+                        Color(0xFFFFEE00), // Bright Yellow
+                        Color(0xFFFF5500), // Burning Orange
+                        Color(0xFFFF0000), // Crimson Red
+                        Color(0xCC221100), // Dark Charcoal Smoke
+                        Color.Transparent
+                    ),
+                    center = Offset(epicenterX, epicenterY),
+                    radius = maxOf(10f, explosionRadius)
+                )
+
+                // Draw volumetric fireball expansion
+                drawCircle(
+                    brush = fireballBrush,
+                    radius = explosionRadius,
+                    center = Offset(epicenterX, epicenterY)
+                )
+
+                // Expanding shockwaves
+                drawCircle(color = Color.White, radius = shockwaveRadius.value * 0.5f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 6f))
+                drawCircle(color = fireOrange, radius = shockwaveRadius.value, center = Offset(epicenterX, epicenterY), style = Stroke(width = 12f))
+                drawCircle(color = fireYellow, radius = shockwaveRadius.value * 0.8f, center = Offset(epicenterX, epicenterY), style = Stroke(width = 6f))
             }
 
             explosionParticles.value.forEach { spark ->
@@ -813,7 +846,7 @@ fun CameraWorkflowHUD(
                 .align(Alignment.TopStart)
         ) {
             Text(
-                text = "JARVIS // DUAL MISSILE TACTICAL",
+                text = "JARVIS // VOLUMETRIC TACTICAL",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
@@ -853,7 +886,7 @@ fun CameraWorkflowHUD(
                 fontFamily = FontFamily.Monospace
             )
             Text(
-                text = "SYSTEM: HOMING BALLISTIC MISSILES",
+                text = "VOLUMETRIC FIREBALL FX: READY",
                 color = hudDimGold,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace
@@ -882,7 +915,7 @@ fun CameraWorkflowHUD(
                 text = when (workflowState) {
                     WorkflowState.SEARCHING -> "[ MIRINO ROSSO = BERSAGLIO NELL'AREA ]"
                     WorkflowState.LOCKED -> "[ 1° CLICK CUFFIA = LANCIA MISSILI ] | [ DOPPIO TAP = SBLOCCA ]"
-                    WorkflowState.FIRING -> "IMPATTO E DEDONAZIONE..."
+                    WorkflowState.FIRING -> "IMPATTO E DEDONAZIONE VOLUMETRICA..."
                 },
                 color = hudDimGold,
                 fontSize = 10.sp,

@@ -1,16 +1,15 @@
-# Implementation Plan - BadGuy AR Bicycle Tactical App (Dual Homing Missiles & Cinematic Impact)
+# Implementation Plan - BadGuy AR Bicycle Tactical App (Volumetric Radial Gradient Explosions & Rocket Plumes)
 
-Upgrading weapon engagement to launch dual homing missiles from the bottom corners of the smartphone, traveling along curved ballistic trajectories to impact the tracked target with realistic explosion FX and multi-channel audio.
+Upgrading visual graphics from simple vector lines/circles to **Volumetric Radial Fireball Gradients**, **Billowing Charcoal Smoke**, **Dual Homing Rockets with Exhaust Trails**, and explaining the asset pipeline.
 
 ## Proposed Changes
 
 ### [Component Name]
 
 #### [MODIFY] [MainActivity.kt](file:///Users/cammoranesi/AndroidStudioProjects/BadGuy/app/src/main/java/com/example/badguy/MainActivity.kt)
-- **Dual Homing Missiles**: Missiles launch from bottom-left `(0, height)` and bottom-right `(width, height)` corners when firing.
-- **Ballistic Trajectories & Fire Trails**: Missiles travel along curved homing arcs towards the live tracked reticle position, drawing glowing fire/smoke trails behind them.
-- **Target Impact & Explosion**: Explosions detonate at `(epicenterX, epicenterY)` upon missile impact.
-- **Enhanced Audio**: Added missile launch whoosh sound before the heavy impact explosion.
+- **Volumetric Explosion Fireball**: Uses `Brush.radialGradient` with multi-stop flame colors (White Core -> Bright Yellow -> Burning Crimson -> Charcoal Smoke -> Alpha Fade) for a realistic expanding fireball explosion.
+- **Volumetric Rocket Plumes**: Rockets drawn with metallic warheads and linear gradient exhaust plumes (Fire Yellow -> Burning Orange -> Smoke Trail).
+- **Explanation**: Provided technical explanation on how sprite sheets / animated GIF assets / volumetric shaders transform vector drawing into realistic game/AR visuals.
 
 ## Verification Plan
 
@@ -18,4 +17,4 @@ Upgrading weapon engagement to launch dual homing missiles from the bottom corne
 - Gradle build (`app:assembleDebug`)
 
 ### Manual Verification
-- Deploy to connected device (`RFGL34STWPJ`) and test missile launch from bottom corners, homing trajectory, impact explosion, and audio.
+- Deploy to connected device (`RFGL34STWPJ`) and verify the volumetric explosion fireball, rocket launch trails, and audio.
